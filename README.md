@@ -1,6 +1,6 @@
 # iso2gene
 
-Current version: `0.1.1`
+Current version: `1.0.0`
 
 `iso2gene` is a clean-room C/C++ implementation of core tximport-style
 gene-level summarization behavior. It is a small dependency-free command line
@@ -407,7 +407,7 @@ clamp before gene-level summarization.
 ## Third-Party Code
 
 iso2gene vendors miniz for gzip input support. miniz is MIT licensed; see
-`third_party/miniz/LICENSE`.
+`THIRD_PARTY_NOTICES.txt` and `LICENSES/miniz-LICENSE.txt`.
 
 ## Development
 

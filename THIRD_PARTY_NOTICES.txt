@@ -1,0 +1,24 @@
+Third-Party Notices for iso2gene
+================================
+
+This file summarizes third-party components included in iso2gene source trees
+and release distributions.
+
+Each third-party component remains under its own license terms. Detailed
+license texts are included under the LICENSES/ directory.
+
+
+Bundled source and statically linked components
+-----------------------------------------------
+
+miniz
+    Used for gzip input support.
+
+    Upstream project:
+      https://github.com/richgel999/miniz
+
+    License:
+      MIT
+
+    Detailed notice:
+      LICENSES/miniz-LICENSE.txt

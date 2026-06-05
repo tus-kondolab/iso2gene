@@ -506,8 +506,8 @@ void test_version_cli_parse() {
 
     const iso2gene::Config config = iso2gene::parse_args(2, argv);
     require(config.command == iso2gene::Command::version, "version command parse");
-    require(std::string(iso2gene::version_string) == "0.1.1", "version string");
-    require(iso2gene::version_text() == "iso2gene 0.1.1\n", "version text");
+    require(std::string(iso2gene::version_string) == "1.0.0", "version string");
+    require(iso2gene::version_text() == "iso2gene 1.0.0\n", "version text");
 }
 
 void test_make_map_basic_gtf() {

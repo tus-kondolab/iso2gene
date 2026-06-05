@@ -2,6 +2,6 @@
 
 namespace iso2gene {
 
-inline constexpr const char* version_string = "0.1.1";
+inline constexpr const char* version_string = "1.0.0";
 
 } // namespace iso2gene
