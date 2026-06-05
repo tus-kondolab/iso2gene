@@ -1,0 +1,4 @@
+target_id	length	eff_length	est_counts	tpm
+tx1	100	90	30	600000
+tx2	200	180	10	200000
+tx3	1000	900	10	200000

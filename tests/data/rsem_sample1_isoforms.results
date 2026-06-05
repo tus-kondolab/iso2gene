@@ -1,0 +1,4 @@
+transcript_id	gene_id	length	effective_length	expected_count	TPM	FPKM	IsoPct
+tx1	geneA	100	90	30	600000	0	0
+tx2	geneA	200	180	10	200000	0	0
+tx3	geneB	1000	900	10	200000	0	0
