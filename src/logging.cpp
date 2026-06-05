@@ -25,7 +25,7 @@ const std::vector<std::string>& Logger::warnings() const {
 }
 
 void Logger::write_warnings(const std::string& path) const {
-    std::ofstream out(path);
+    std::ofstream out(path, std::ios::out | std::ios::binary);
     if (!out) {
         throw Iso2GeneError(ExitCode::io_error, "failed to open warnings file for writing: " + path);
     }

@@ -16,7 +16,7 @@ std::string path_join(const std::string& dir, const std::string& filename) {
 }
 
 void write_summary(const Config& config, const GeneMatrices& matrices, const std::string& path) {
-    std::ofstream out(path);
+    std::ofstream out(path, std::ios::out | std::ios::binary);
     if (!out) {
         throw Iso2GeneError(ExitCode::io_error, "failed to open summary for writing: " + path);
     }
@@ -48,7 +48,7 @@ void write_matrix_tsv(
         );
     }
 
-    std::ofstream out(path);
+    std::ofstream out(path, std::ios::out | std::ios::binary);
     if (!out) {
         throw Iso2GeneError(ExitCode::io_error, "failed to open matrix for writing: " + path);
     }

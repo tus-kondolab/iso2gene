@@ -22,6 +22,7 @@
 #include "iso2gene/text_reader.hpp"
 #include "iso2gene/tsv.hpp"
 #include "iso2gene/tx2gene.hpp"
+#include "iso2gene/write_matrix.hpp"
 #include "iso2gene/error.hpp"
 #include "iso2gene/version.hpp"
 
@@ -471,6 +472,12 @@ void drain_text_reader(const std::string& path) {
     }
 }
 
+void require_lf_only_file(const std::string& path, const std::string& label) {
+    const std::string contents = read_binary_file(path);
+    require(contents.find('\n') != std::string::npos, label + " contains LF");
+    require(contents.find('\r') == std::string::npos, label + " does not contain CR");
+}
+
 void test_make_map_cli_parse() {
     char arg0[] = "iso2gene";
     char arg1[] = "make-map";
@@ -786,6 +793,64 @@ void test_gzip_concatenated_members_and_errors() {
     require(saw_crc_mismatch, "gzip CRC mismatch is rejected");
 }
 
+void test_file_outputs_use_lf() {
+    const std::string outdir = temp_output_path("iso2gene_lf_outputs");
+
+    iso2gene::Config config;
+    config.outdir = outdir;
+    config.input_type = "kallisto";
+    config.mode = iso2gene::CountMode::length_scaled_tpm;
+    config.precision = 17;
+
+    iso2gene::GeneMatrices matrices;
+    matrices.gene_ids = {"gene_lf"};
+    matrices.sample_names = {"sample_lf"};
+    matrices.counts = iso2gene::Matrix<double>(1, 1);
+    matrices.tpm = iso2gene::Matrix<double>(1, 1);
+    matrices.length = iso2gene::Matrix<double>(1, 1);
+    matrices.counts(0, 0) = 1.5;
+    matrices.tpm(0, 0) = 200000.0;
+    matrices.length(0, 0) = 350.0;
+    matrices.total_records = 1;
+    matrices.mapped_records = 1;
+
+    iso2gene::Logger logger;
+    logger.warn("lf warning");
+    iso2gene::write_outputs(config, matrices, logger);
+
+    require_lf_only_file(
+        (std::filesystem::path(outdir) / "gene_counts.tsv").string(),
+        "gene_counts.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(outdir) / "gene_tpm.tsv").string(),
+        "gene_tpm.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(outdir) / "gene_length.tsv").string(),
+        "gene_length.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(outdir) / "summary.tsv").string(),
+        "summary.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(outdir) / "warnings.log").string(),
+        "warnings.log"
+    );
+
+    iso2gene::Logger map_logger;
+    const std::string tx2gene_out = temp_output_path("iso2gene_lf_tx2gene.tsv");
+    const iso2gene::GtfMapOptions options{
+        "tests/data/annotation_basic.gtf",
+        tx2gene_out,
+        "transcript_id",
+        "gene_id"
+    };
+    (void)iso2gene::make_tx2gene_from_gtf(options, map_logger);
+    require_lf_only_file(tx2gene_out, "make-map tx2gene.tsv");
+}
+
 } // namespace
 
 int main() {
@@ -811,6 +876,7 @@ int main() {
         test_gzip_optional_header_fields();
         test_gzip_inputs_match_plain();
         test_gzip_concatenated_members_and_errors();
+        test_file_outputs_use_lf();
     } catch (const std::exception& error) {
         std::cerr << "TEST FAILED: " << error.what() << '\n';
         return 1;

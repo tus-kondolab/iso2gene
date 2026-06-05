@@ -145,7 +145,7 @@ void write_tx2gene_tsv(
     const std::string& path,
     const std::vector<MappingEntry>& mappings
 ) {
-    std::ofstream out(path);
+    std::ofstream out(path, std::ios::out | std::ios::binary);
     if (!out) {
         throw Iso2GeneError(ExitCode::io_error, "failed to open tx2gene output for writing: " + path);
     }
