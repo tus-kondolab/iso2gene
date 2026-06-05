@@ -6,6 +6,7 @@
 #include <unordered_set>
 
 #include "iso2gene/error.hpp"
+#include "iso2gene/version.hpp"
 
 namespace iso2gene {
 
@@ -63,47 +64,62 @@ int parse_precision(const std::string& value) {
 }
 
 void validate_config(const Config& config) {
-    if (config.command != Command::counts) {
+    if (config.command == Command::counts) {
+        if (
+            config.input_type != "kallisto"
+            && config.input_type != "salmon"
+            && config.input_type != "rsem"
+        ) {
+            throw Iso2GeneError(
+                ExitCode::input_error,
+                "unsupported --type '" + config.input_type + "'; expected kallisto, salmon, or rsem"
+            );
+        }
+        if (config.tx2gene_path.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "missing required option: --map");
+        }
+        if (!config.sample_sheet_path.empty() && !config.direct_samples.empty()) {
+            throw Iso2GeneError(
+                ExitCode::input_error,
+                "use either --sample-sheet or direct sample=path inputs, not both"
+            );
+        }
+        if (config.sample_sheet_path.empty() && config.direct_samples.empty()) {
+            throw Iso2GeneError(
+                ExitCode::input_error,
+                "missing samples; use --sample-sheet or direct sample=path inputs"
+            );
+        }
+
+        std::unordered_set<std::string> names;
+        for (const SampleInput& sample : config.direct_samples) {
+            if (sample.name.empty() || sample.path.empty()) {
+                throw Iso2GeneError(ExitCode::input_error, "sample name and path must be non-empty");
+            }
+            if (!names.insert(sample.name).second) {
+                throw Iso2GeneError(
+                    ExitCode::input_error,
+                    "duplicate sample name in direct inputs: " + sample.name
+                );
+            }
+        }
         return;
     }
 
-    if (
-        config.input_type != "kallisto"
-        && config.input_type != "salmon"
-        && config.input_type != "rsem"
-    ) {
-        throw Iso2GeneError(
-            ExitCode::input_error,
-            "unsupported --type '" + config.input_type + "'; expected kallisto, salmon, or rsem"
-        );
-    }
-    if (config.tx2gene_path.empty()) {
-        throw Iso2GeneError(ExitCode::input_error, "missing required option: --map");
-    }
-    if (!config.sample_sheet_path.empty() && !config.direct_samples.empty()) {
-        throw Iso2GeneError(
-            ExitCode::input_error,
-            "use either --sample-sheet or direct sample=path inputs, not both"
-        );
-    }
-    if (config.sample_sheet_path.empty() && config.direct_samples.empty()) {
-        throw Iso2GeneError(
-            ExitCode::input_error,
-            "missing samples; use --sample-sheet or direct sample=path inputs"
-        );
-    }
-
-    std::unordered_set<std::string> names;
-    for (const SampleInput& sample : config.direct_samples) {
-        if (sample.name.empty() || sample.path.empty()) {
-            throw Iso2GeneError(ExitCode::input_error, "sample name and path must be non-empty");
+    if (config.command == Command::make_map) {
+        if (config.gtf_path.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "missing required option: --gtf");
         }
-        if (!names.insert(sample.name).second) {
-            throw Iso2GeneError(
-                ExitCode::input_error,
-                "duplicate sample name in direct inputs: " + sample.name
-            );
+        if (config.map_out_path.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "missing required option: --out");
         }
+        if (config.transcript_id_attr.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "--transcript-id-attr must be non-empty");
+        }
+        if (config.gene_id_attr.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "--gene-id-attr must be non-empty");
+        }
+        return;
     }
 }
 
@@ -123,14 +139,18 @@ Config parse_args(int argc, char** argv) {
         config.command = Command::help;
         return config;
     }
-    if (first != "counts") {
+    if (first == "--version" || first == "version") {
+        config.command = Command::version;
+        return config;
+    }
+    if (first != "counts" && first != "make-map") {
         throw Iso2GeneError(
             ExitCode::input_error,
-            "unknown command '" + first + "'; expected counts or help"
+            "unknown command '" + first + "'; expected counts, make-map, or help"
         );
     }
 
-    config.command = Command::counts;
+    config.command = first == "counts" ? Command::counts : Command::make_map;
 
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -138,26 +158,46 @@ Config parse_args(int argc, char** argv) {
             config.show_help = true;
             return config;
         }
-        if (arg == "--type") {
-            config.input_type = require_value(argc, argv, i, arg);
-        } else if (arg == "--map") {
-            config.tx2gene_path = require_value(argc, argv, i, arg);
-        } else if (arg == "--sample-sheet") {
-            config.sample_sheet_path = require_value(argc, argv, i, arg);
-        } else if (arg == "--mode") {
-            config.mode = parse_mode(require_value(argc, argv, i, arg));
-        } else if (arg == "--outdir") {
-            config.outdir = require_value(argc, argv, i, arg);
-        } else if (arg == "--precision") {
-            config.precision = parse_precision(require_value(argc, argv, i, arg));
-        } else if (arg == "--ignore-version") {
-            config.id_options.ignore_version = true;
-        } else if (arg == "--ignore-after-bar") {
-            config.id_options.ignore_after_bar = true;
-        } else if (is_option(arg)) {
-            throw Iso2GeneError(ExitCode::input_error, "unknown option: " + arg);
+
+        if (config.command == Command::counts) {
+            if (arg == "--type") {
+                config.input_type = require_value(argc, argv, i, arg);
+            } else if (arg == "--map") {
+                config.tx2gene_path = require_value(argc, argv, i, arg);
+            } else if (arg == "--sample-sheet") {
+                config.sample_sheet_path = require_value(argc, argv, i, arg);
+            } else if (arg == "--mode") {
+                config.mode = parse_mode(require_value(argc, argv, i, arg));
+            } else if (arg == "--outdir") {
+                config.outdir = require_value(argc, argv, i, arg);
+            } else if (arg == "--precision") {
+                config.precision = parse_precision(require_value(argc, argv, i, arg));
+            } else if (arg == "--ignore-version") {
+                config.id_options.ignore_version = true;
+            } else if (arg == "--ignore-after-bar") {
+                config.id_options.ignore_after_bar = true;
+            } else if (is_option(arg)) {
+                throw Iso2GeneError(ExitCode::input_error, "unknown option: " + arg);
+            } else {
+                config.direct_samples.push_back(parse_direct_sample(arg));
+            }
         } else {
-            config.direct_samples.push_back(parse_direct_sample(arg));
+            if (arg == "--gtf") {
+                config.gtf_path = require_value(argc, argv, i, arg);
+            } else if (arg == "--out") {
+                config.map_out_path = require_value(argc, argv, i, arg);
+            } else if (arg == "--transcript-id-attr") {
+                config.transcript_id_attr = require_value(argc, argv, i, arg);
+            } else if (arg == "--gene-id-attr") {
+                config.gene_id_attr = require_value(argc, argv, i, arg);
+            } else if (is_option(arg)) {
+                throw Iso2GeneError(ExitCode::input_error, "unknown option: " + arg);
+            } else {
+                throw Iso2GeneError(
+                    ExitCode::input_error,
+                    "unexpected argument for make-map: " + arg
+                );
+            }
         }
     }
 
@@ -183,7 +223,9 @@ std::string help_text() {
         << "iso2gene: summarize transcript-level quantification to gene-level matrices\n\n"
         << "Usage:\n"
         << "  iso2gene counts --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]\n"
-        << "  iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...\n\n"
+        << "  iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...\n"
+        << "  iso2gene make-map --gtf annotation.gtf --out tx2gene.tsv [options]\n"
+        << "  iso2gene --version\n\n"
         << "Required for counts:\n"
         << "  --map PATH             transcript-to-gene TSV; first two columns are transcript_id and gene_id\n"
         << "  --sample-sheet PATH    TSV with sample and path columns, unless direct sample=path inputs are used\n\n"
@@ -195,9 +237,20 @@ std::string help_text() {
         << "  --ignore-version       strip transcript suffix after first dot\n"
         << "  --ignore-after-bar     strip transcript suffix after first bar\n"
         << "  --help                 show this help\n\n"
-        << "Outputs:\n"
-        << "  gene_counts.tsv, gene_tpm.tsv, gene_length.tsv, summary.tsv, warnings.log\n";
+        << "Options for make-map:\n"
+        << "  --gtf PATH             plain text GTF annotation\n"
+        << "  --out PATH             output tx2gene TSV path\n"
+        << "  --transcript-id-attr NAME attribute name for transcript IDs (default: transcript_id)\n"
+        << "  --gene-id-attr NAME    attribute name for gene IDs (default: gene_id)\n\n"
+        << "Outputs for counts:\n"
+        << "  gene_counts.tsv, gene_tpm.tsv, gene_length.tsv, summary.tsv, warnings.log\n\n"
+        << "Output for make-map:\n"
+        << "  tx2gene TSV at --out\n";
     return out.str();
+}
+
+std::string version_text() {
+    return std::string("iso2gene ") + version_string + "\n";
 }
 
 } // namespace iso2gene

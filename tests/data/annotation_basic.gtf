@@ -1,0 +1,6 @@
+# basic GTF fixture
+chr1	src	gene	1	100	.	+	.	gene_id "geneA"; gene_name "Gene A";
+chr1	src	exon	1	10	.	+	.	gene_id "geneA"; transcript_id "tx1"; tag "basic";
+chr1	src	exon	20	30	.	+	.	transcript_id "tx1"; gene_id "geneA";
+chr1	src	CDS	40	50	.	+	.	gene_id "geneB"; transcript_id "tx2";
+chr2	src	exon	10	20	.	-	.	gene_id "geneC"; transcript_id "tx3";

@@ -1,0 +1,4 @@
+# GENCODE-like attribute edge cases
+chr1	HAVANA	transcript	1	100	.	+	.	gene_id "ENSG000001.1"; transcript_id "ENST000001.1"; gene_type "protein_coding"; tag "basic"; tag "appris_principal_1"; tag "CCDS"; ont "A"; ont "B"; ref_gene_id "WRONG"; havana_gene_id "ALSO_WRONG";
+chr1	HAVANA	gene	1	100	.	+	.	gene_id "ENSGEMPTY"; transcript_id ""; tag "basic";
+chr1	HAVANA	exon	1	50	.	+	.	ref_gene_id "REFONLY"; havana_gene_id "HAVANA"; transcript_id "ENSTREF.1"; tag "basic";

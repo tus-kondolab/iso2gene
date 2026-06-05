@@ -1,11 +1,19 @@
 # iso2gene
 
-`iso2gene` is a clean-room C/C++ implementation of the tximport algorighm. It is a small
-dependency-free command line tool that summarizes transcript- or isoform-level
-quantification files to gene-level matrices.
+Current version: `0.1.1`
 
-It is designed for workflows that need tximport-like output without requiring
-R at runtime:
+`iso2gene` is a clean-room C/C++ implementation of core tximport-style
+gene-level summarization behavior. It is a small dependency-free command line
+tool that summarizes transcript- or isoform-level quantification files to
+gene-level matrices, with native support for Windows, Linux, and macOS.
+
+In addition to tximport-style summarization, iso2gene can generate
+`tx2gene.tsv` directly from plain text GTF annotations. This `make-map`
+subcommand is an iso2gene convenience feature and is not part of tximport
+itself.
+
+It is designed for workflows that need tximport-like gene-level matrices from a
+small standalone command line tool:
 
 ```text
 kallisto / Salmon / RSEM transcript quantification
@@ -14,15 +22,12 @@ kallisto / Salmon / RSEM transcript quantification
 -> DESeq2 / PyDESeq2 / edgeR / downstream RNA-seq analysis
 ```
 
-The implementation is independent from the tximport source code: iso2gene does
-not copy, translate, or port tximport internals. Its calculation behavior is
-validated against Bioconductor tximport using tximportData-derived fixtures.
-
 ## Features
 
 - Supports kallisto `abundance.tsv`
 - Supports Salmon `quant.sf`
-- Supports RSEM `isoforms.results`
+- Supports RSEM `isoforms.results` 
+- Generates `tx2gene.tsv` from plain text GTF annotations
 - Produces gene-level counts, TPM, and effective length matrices
 - Implements `simple-sum`, `scaled-tpm`, and `length-scaled-tpm`
 - Matches tximport `countsFromAbundance="no"`, `"scaledTPM"`, and
@@ -32,12 +37,10 @@ validated against Bioconductor tximport using tximportData-derived fixtures.
 
 ## Current Limitations
 
-- Input files must be plain text. `.gz` files are not supported yet.
-- `abundance.h5` is not supported yet.
-- Salmon/RSEM inferential replicates are not imported.
-- RSEM `genes.results` is not supported yet.
-- GTF/GFF3 parsing and tx2gene generation are not implemented yet.
-- `--map` is required for all input types, including RSEM.
+- Input files must be plain text. `.gz` files are not supported.
+- `abundance.h5` is not supported.
+- Inferential replicates such as Salmon Gibbs/bootstrap or kallisto bootstrap data are not imported.
+- GFF3 parsing is not supported.
 
 ## Install
 
@@ -61,8 +64,6 @@ cmake -S . -B build
 cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
-
-This uses the Visual Studio/MSBuild generator and is Windows-specific.
 
 Windows/Linux/macOS with Ninja:
 
@@ -90,6 +91,14 @@ Create a transcript-to-gene map:
 transcript_id	gene_id
 ENST00000456328.2	ENSG00000223972.5
 ENST00000450305.2	ENSG00000223972.5
+```
+
+If you have a GTF annotation, generate the map first:
+
+```bash
+iso2gene make-map \
+  --gtf gencode.annotation.gtf \
+  --out tx2gene.tsv
 ```
 
 Create a sample sheet:
@@ -146,6 +155,8 @@ to match tximport's RSEM behavior.
 ```text
 iso2gene counts --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]
 iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...
+iso2gene make-map --gtf annotation.gtf --out tx2gene.tsv [options]
+iso2gene --version
 ```
 
 Required for `counts`:
@@ -165,6 +176,21 @@ Options:
 | `--precision N` | Numeric output precision from `1` to `17`; default is `10` |
 | `--ignore-version` | Strip transcript suffix after the first dot |
 | `--ignore-after-bar` | Strip transcript suffix after the first bar |
+| `--help` | Show help |
+
+Required for `make-map`:
+
+| Option | Description |
+|---|---|
+| `--gtf PATH` | Plain text GTF annotation |
+| `--out PATH` | Output `tx2gene.tsv` path |
+
+Options for `make-map`:
+
+| Option | Description |
+|---|---|
+| `--transcript-id-attr NAME` | GTF attribute name for transcript IDs; default is `transcript_id` |
+| `--gene-id-attr NAME` | GTF attribute name for gene IDs; default is `gene_id` |
 | `--help` | Show help |
 
 ## Sample Sheet
@@ -278,6 +304,11 @@ ENST00000456328.2|ENSG00000223972.5|... -> ENST00000456328.2
 These transformations are applied to both the quantification file IDs and the
 tx2gene transcript IDs.
 
+`iso2gene make-map` writes transcript IDs as they appear in the GTF. If version
+or bar suffix normalization is needed, apply `--ignore-version` or
+`--ignore-after-bar` when running `counts`, so the same rule is applied to both
+the quantification file and `tx2gene.tsv`.
+
 ## tx2gene File
 
 `--map` expects a two-column TSV:
@@ -293,6 +324,19 @@ are treated as transcript ID and gene ID.
 
 The same transcript may not map to multiple genes. Duplicate identical rows
 are ignored with a warning.
+
+To create this file from a plain text GTF annotation:
+
+```bash
+iso2gene make-map \
+  --gtf annotation.gtf \
+  --out tx2gene.tsv
+```
+
+`make-map` extracts rows that contain both `transcript_id` and `gene_id`
+attributes, collapses duplicate identical transcript-to-gene mappings, and
+rejects transcripts that map to multiple genes. GFF3 and `.gtf.gz` input are
+not supported.
 
 ## Validation Against tximport
 

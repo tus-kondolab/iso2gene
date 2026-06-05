@@ -4,6 +4,7 @@
 
 #include "iso2gene/cli.hpp"
 #include "iso2gene/error.hpp"
+#include "iso2gene/gtf.hpp"
 #include "iso2gene/kallisto.hpp"
 #include "iso2gene/logging.hpp"
 #include "iso2gene/quant.hpp"
@@ -49,6 +50,18 @@ int run_counts(const iso2gene::Config& config) {
     return static_cast<int>(iso2gene::ExitCode::success);
 }
 
+int run_make_map(const iso2gene::Config& config) {
+    iso2gene::Logger logger;
+    const iso2gene::GtfMapOptions options{
+        config.gtf_path,
+        config.map_out_path,
+        config.transcript_id_attr,
+        config.gene_id_attr
+    };
+    (void)iso2gene::make_tx2gene_from_gtf(options, logger);
+    return static_cast<int>(iso2gene::ExitCode::success);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -60,8 +73,13 @@ int main(int argc, char** argv) {
         }
 
         switch (config.command) {
+        case iso2gene::Command::version:
+            std::cout << iso2gene::version_text();
+            return static_cast<int>(iso2gene::ExitCode::success);
         case iso2gene::Command::counts:
             return run_counts(config);
+        case iso2gene::Command::make_map:
+            return run_make_map(config);
         case iso2gene::Command::help:
             std::cout << iso2gene::help_text();
             return static_cast<int>(iso2gene::ExitCode::success);

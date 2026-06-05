@@ -1,9 +1,12 @@
 #include <cmath>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
 
+#include "iso2gene/cli.hpp"
+#include "iso2gene/gtf.hpp"
 #include "iso2gene/id.hpp"
 #include "iso2gene/kallisto.hpp"
 #include "iso2gene/logging.hpp"
@@ -16,6 +19,7 @@
 #include "iso2gene/tsv.hpp"
 #include "iso2gene/tx2gene.hpp"
 #include "iso2gene/error.hpp"
+#include "iso2gene/version.hpp"
 
 namespace {
 
@@ -320,6 +324,142 @@ void test_rsem_zero_effective_length_summarization() {
     require_near(matrices.length(geneZ, 0), 100.5, "rsem all-zero gene length replacement clamps zero effective length");
 }
 
+std::string temp_output_path(const std::string& filename) {
+    return (std::filesystem::temp_directory_path() / filename).string();
+}
+
+void test_make_map_cli_parse() {
+    char arg0[] = "iso2gene";
+    char arg1[] = "make-map";
+    char arg2[] = "--gtf";
+    char arg3[] = "annotation.gtf";
+    char arg4[] = "--out";
+    char arg5[] = "tx2gene.tsv";
+    char arg6[] = "--transcript-id-attr";
+    char arg7[] = "transcript";
+    char arg8[] = "--gene-id-attr";
+    char arg9[] = "gene";
+    char* argv[] = {arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9};
+
+    const iso2gene::Config config = iso2gene::parse_args(10, argv);
+    require(config.command == iso2gene::Command::make_map, "make-map command parse");
+    require(config.gtf_path == "annotation.gtf", "make-map --gtf parse");
+    require(config.map_out_path == "tx2gene.tsv", "make-map --out parse");
+    require(config.transcript_id_attr == "transcript", "make-map transcript attr parse");
+    require(config.gene_id_attr == "gene", "make-map gene attr parse");
+}
+
+void test_version_cli_parse() {
+    char arg0[] = "iso2gene";
+    char arg1[] = "--version";
+    char* argv[] = {arg0, arg1};
+
+    const iso2gene::Config config = iso2gene::parse_args(2, argv);
+    require(config.command == iso2gene::Command::version, "version command parse");
+    require(std::string(iso2gene::version_string) == "0.1.1", "version string");
+    require(iso2gene::version_text() == "iso2gene 0.1.1\n", "version text");
+}
+
+void test_make_map_basic_gtf() {
+    iso2gene::Logger logger;
+    const std::string out_path = temp_output_path("iso2gene_annotation_basic_tx2gene.tsv");
+    const iso2gene::GtfMapOptions options{
+        "tests/data/annotation_basic.gtf",
+        out_path,
+        "transcript_id",
+        "gene_id"
+    };
+
+    const iso2gene::GtfMapStats stats = iso2gene::make_tx2gene_from_gtf(options, logger);
+    require(stats.mappings_written == 3, "GTF basic mappings written");
+    require(stats.duplicate_same_gene_rows == 1, "GTF duplicate same-gene rows");
+    require(stats.missing_transcript_id_rows == 1, "GTF gene rows without transcript are skipped");
+
+    const iso2gene::IdOptions id_options;
+    const iso2gene::Tx2GeneMap map = iso2gene::read_tx2gene(out_path, id_options, logger);
+    require(map.tx_to_gene.size() == 3, "generated tx2gene size");
+    require(map.tx_to_gene.at("tx1") == "geneA", "generated tx1 mapping");
+    require(map.tx_to_gene.at("tx2") == "geneB", "generated tx2 mapping");
+    require(map.tx_to_gene.at("tx3") == "geneC", "generated tx3 mapping");
+}
+
+void test_make_map_gencode_attribute_edges() {
+    iso2gene::Logger logger;
+    const std::string out_path = temp_output_path("iso2gene_annotation_gencode_tx2gene.tsv");
+    const iso2gene::GtfMapOptions options{
+        "tests/data/annotation_gencode_fragment.gtf",
+        out_path,
+        "transcript_id",
+        "gene_id"
+    };
+
+    const iso2gene::GtfMapStats stats = iso2gene::make_tx2gene_from_gtf(options, logger);
+    require(stats.mappings_written == 1, "GENCODE-like fixture mapping count");
+    require(stats.empty_transcript_id_rows == 1, "empty transcript_id is skipped");
+    require(stats.missing_gene_id_rows == 1, "similar gene keys are not gene_id");
+
+    const iso2gene::IdOptions id_options;
+    const iso2gene::Tx2GeneMap map = iso2gene::read_tx2gene(out_path, id_options, logger);
+    require(map.tx_to_gene.size() == 1, "GENCODE-like output size");
+    require(
+        map.tx_to_gene.at("ENST000001.1") == "ENSG000001.1",
+        "GENCODE-like exact gene_id mapping"
+    );
+    require(
+        map.tx_to_gene.find("ENSTREF.1") == map.tx_to_gene.end(),
+        "ref_gene_id is not mistaken for gene_id"
+    );
+}
+
+void test_make_map_rejects_conflicts_and_bad_attributes() {
+    iso2gene::Logger logger;
+
+    bool saw_conflict = false;
+    try {
+        const iso2gene::GtfMapOptions options{
+            "tests/data/annotation_conflict.gtf",
+            temp_output_path("iso2gene_annotation_conflict_tx2gene.tsv"),
+            "transcript_id",
+            "gene_id"
+        };
+        (void)iso2gene::make_tx2gene_from_gtf(options, logger);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_conflict = error.code() == iso2gene::ExitCode::parse_error
+            && std::string(error.what()).find("maps to multiple genes") != std::string::npos;
+    }
+    require(saw_conflict, "GTF conflict mapping is rejected");
+
+    bool saw_duplicate_attr = false;
+    try {
+        const iso2gene::GtfMapOptions options{
+            "tests/data/annotation_bad_duplicate_attr.gtf",
+            temp_output_path("iso2gene_annotation_bad_duplicate_attr_tx2gene.tsv"),
+            "transcript_id",
+            "gene_id"
+        };
+        (void)iso2gene::make_tx2gene_from_gtf(options, logger);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_duplicate_attr = error.code() == iso2gene::ExitCode::parse_error
+            && std::string(error.what()).find("appears multiple times") != std::string::npos;
+    }
+    require(saw_duplicate_attr, "conflicting duplicate transcript_id attribute is rejected");
+
+    bool saw_gff3_hint = false;
+    try {
+        const iso2gene::GtfMapOptions options{
+            "tests/data/annotation_gff3.gtf",
+            temp_output_path("iso2gene_annotation_gff3_tx2gene.tsv"),
+            "transcript_id",
+            "gene_id"
+        };
+        (void)iso2gene::make_tx2gene_from_gtf(options, logger);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_gff3_hint = error.code() == iso2gene::ExitCode::parse_error
+            && std::string(error.what()).find("GFF3 is not supported") != std::string::npos;
+    }
+    require(saw_gff3_hint, "GFF3-like attributes get a helpful error");
+}
+
 } // namespace
 
 int main() {
@@ -335,6 +475,11 @@ int main() {
         test_scaled_tpm_uses_mapped_denominators();
         test_zero_abundance_length_replacement();
         test_rsem_zero_effective_length_summarization();
+        test_version_cli_parse();
+        test_make_map_cli_parse();
+        test_make_map_basic_gtf();
+        test_make_map_gencode_attribute_edges();
+        test_make_map_rejects_conflicts_and_bad_attributes();
     } catch (const std::exception& error) {
         std::cerr << "TEST FAILED: " << error.what() << '\n';
         return 1;

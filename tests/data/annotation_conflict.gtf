@@ -1,0 +1,2 @@
+chr1	src	exon	1	10	.	+	.	gene_id "geneA"; transcript_id "tx1";
+chr1	src	exon	20	30	.	+	.	gene_id "geneB"; transcript_id "tx1";
