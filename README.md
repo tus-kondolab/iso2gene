@@ -1,8 +1,8 @@
-# iso2gene
+# iso2gene: compact transcript-to-gene summarization tool
 
 Current version: `1.0.0`
 
-`iso2gene` is a clean-room C/C++ implementation of the core functionality of the **`tximport`** gene-level summarization program. iso2gene is provided as a small command line tool and offers native support for Windows, Linux, and macOS.
+`iso2gene` is a clean-room C/C++ implementation of the core functionality of the **`tximport`** package. iso2gene is provided as a compact command line tool and offers native support for Windows, Linux, and macOS.
 
 In addition to tximport-style summarization, iso2gene can generate
 `tx2gene.tsv` directly from GTF annotations. This `make-map`
@@ -21,35 +21,24 @@ kallisto / Salmon / RSEM transcript quantification
 
 ## Features
 
-- Supports kallisto `abundance.tsv` and `abundance.tsv.gz`
-- Supports Salmon `quant.sf` and `quant.sf.gz`
-- Supports RSEM `isoforms.results` and `isoforms.results.gz`
-- Generates `tx2gene.tsv` from plain text or gzip-compressed GTF annotations
-- Produces gene-level counts, TPM, and effective length matrices
-- Implements `simple-sum`, `scaled-tpm`, and `length-scaled-tpm`
+- Produces gene-level counts, TPM, and effective length matrices from kallisto
+  `abundance.tsv`, Salmon `quant.sf`, and RSEM `isoforms.results`
 - Matches tximport `countsFromAbundance="no"`, `"scaledTPM"`, and
   `"lengthScaledTPM"` for supported inputs
-- Runs as a native C++17 executable with no external runtime dependencies
-- Builds with MSVC, GCC, Clang, and Apple Clang
-- Reads LF, CRLF, CR, and no-final-newline text inputs consistently
+- Reads plain text and `.gz` quantification files directly
+- Generates `tx2gene.tsv` from plain text or gzip-compressed GTF annotations
+- Runs as a native command line executable on Windows, Linux, and macOS
 
 ## Current Limitations
 
-- kallisto `abundance.h5` is not supported.
-- tximport input types `sailfish`, `stringtie`, `alevin`, `piscem`,
-  `oarfish`, and `none` are not supported.
-- Inferential replicates such as Salmon Gibbs/bootstrap or kallisto bootstrap data are not imported.
-- GFF3 parsing is not supported.
+The following tximport features are not currently implemented in iso2gene:
 
-## Gzip Input
-
-iso2gene reads plain text and `.gz` inputs directly. This applies to
-quantification files, `tx2gene` maps, sample sheets, and GTF files used by
-`make-map`.
-
-Gzip support is always enabled in source builds and release binaries. It uses
-vendored miniz, so users do not need to install zlib or a separate gzip command
-at runtime.
+- kallisto HDF5 input, `abundance.h5`
+- tximport input types `sailfish`, `stringtie`, `alevin`, `piscem`, and
+  `oarfish`
+- tximport custom-column input mode, `type="none"`
+- Inferential replicates, such as Salmon Gibbs/bootstrap or kallisto bootstrap
+  data
 
 ## Install
 
@@ -71,68 +60,48 @@ Extract the ZIP file and run `iso2gene.exe` from PowerShell:
 .\iso2gene.exe --version
 ```
 
-No compiler, CMake, R, Python, zlib, or gzip command is required to run the
-Windows release binary.
-
 ### Build From Source
 
-Use this route on Linux/macOS, or on Windows when you want a local developer
-build.
+Use these commands to build iso2gene locally instead of using a prebuilt
+release binary.
 
-Install build tools if needed:
-
-Ubuntu/Debian:
+Linux:
 
 ```bash
 sudo apt update
 sudo apt install -y git g++ cmake ninja-build
-```
-
-Fedora:
-
-```bash
-sudo dnf install -y git gcc-c++ cmake ninja-build
-```
-
-macOS with Homebrew:
-
-```bash
-xcode-select --install
-brew install git cmake ninja
-```
-
-Clone the repository:
-
-```bash
 git clone https://github.com/tus-kondolab/iso2gene.git
 cd iso2gene
-```
-
-Windows with Visual Studio generator:
-
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-Windows/Linux/macOS with Ninja:
-
-```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-The executable is typically written to one of:
+macOS:
 
-```text
-build/Release/iso2gene.exe
-build/iso2gene
+```bash
+xcode-select --install
+brew install git cmake ninja
+git clone https://github.com/tus-kondolab/iso2gene.git
+cd iso2gene
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
 ```
 
-depending on the generator and platform. The commands above build Release
-binaries.
+Windows:
+
+Use Developer PowerShell for VS. Visual Studio with the "Desktop development with C++" workload must be installed.
+
+```powershell
+git clone https://github.com/tus-kondolab/iso2gene.git
+cd iso2gene
+cmake -S . -B build
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The commands above build Release binaries.
 
 ## Quick Start
 
@@ -195,6 +164,11 @@ Column names are matched exactly, including case. For example, Salmon uses
 
 For RSEM input, `effective_length` values smaller than `1` are clamped to `1`
 to match tximport's RSEM behavior.
+
+## GZIP Input
+
+iso2gene reads plain text and `.gz` inputs directly. This applies to
+quantification files, `tx2gene` maps, sample sheets, and GTF files used by `make-map`.
 
 ## Command Line
 
