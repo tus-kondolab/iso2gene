@@ -79,11 +79,27 @@ Windows release binary.
 Use this route on Linux/macOS, or on Windows when you want a local developer
 build.
 
-Requirements:
+Install build tools if needed:
 
-- Git
-- CMake 3.20 or newer
-- A C++17 compiler
+Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install -y git g++ cmake ninja-build
+```
+
+Fedora:
+
+```bash
+sudo dnf install -y git gcc-c++ cmake ninja-build
+```
+
+macOS with Homebrew:
+
+```bash
+xcode-select --install
+brew install git cmake ninja
+```
 
 Clone the repository:
 
@@ -120,21 +136,16 @@ binaries.
 
 ## Quick Start
 
-Create a transcript-to-gene map:
-
-```text
-transcript_id	gene_id
-ENST00000456328.2	ENSG00000223972.5
-ENST00000450305.2	ENSG00000223972.5
-```
-
-If you have a GTF annotation, generate the map first:
+Generate a transcript-to-gene map from a GTF annotation:
 
 ```bash
 iso2gene make-map \
   --gtf gencode.annotation.gtf \
   --out tx2gene.tsv
 ```
+
+If you already have a two-column `tx2gene.tsv` file, you can use it directly
+and skip this step.
 
 Create a sample sheet:
 
