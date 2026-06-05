@@ -2,17 +2,14 @@
 
 Current version: `1.0.0`
 
-`iso2gene` is a clean-room C/C++ implementation of core tximport-style
-gene-level summarization behavior. It is a small dependency-free command line
-tool that summarizes transcript- or isoform-level quantification files to
-gene-level matrices, with native support for Windows, Linux, and macOS.
+`iso2gene` is a clean-room C/C++ implementation of the core functionality of the **`tximport`** gene-level summarization program. iso2gene is provided as a small command line tool and offers native support for Windows, Linux, and macOS.
 
 In addition to tximport-style summarization, iso2gene can generate
 `tx2gene.tsv` directly from GTF annotations. This `make-map`
 subcommand is an iso2gene convenience feature and is not part of tximport
 itself.
 
-It is designed for workflows that need tximport-like gene-level matrices from a
+It is designed for workflows that need **`tximport`**-compatible gene-level matrices from a
 small standalone command line tool:
 
 ```text
@@ -55,6 +52,32 @@ vendored miniz, so users do not need to install zlib or a separate gzip command
 at runtime.
 
 ## Install
+
+### Windows
+
+Download the Windows release ZIP from the GitHub Releases page:
+
+https://github.com/tus-kondolab/iso2gene/releases
+
+For version `1.0.0`, download:
+
+```text
+iso2gene-1.0.0-windows-x64.zip
+```
+
+Extract the ZIP file and run `iso2gene.exe` from PowerShell:
+
+```powershell
+.\iso2gene.exe --version
+```
+
+No compiler, CMake, R, Python, zlib, or gzip command is required to run the
+Windows release binary.
+
+### Build From Source
+
+Use this route on Linux/macOS, or on Windows when you want a local developer
+build.
 
 Requirements:
 
@@ -140,7 +163,7 @@ iso2gene counts \
 On Windows PowerShell:
 
 ```powershell
-.\build\Release\iso2gene.exe counts `
+.\iso2gene.exe counts `
   --type kallisto `
   --map tx2gene.tsv `
   --sample-sheet samples.tsv `
