@@ -8,7 +8,7 @@ tool that summarizes transcript- or isoform-level quantification files to
 gene-level matrices, with native support for Windows, Linux, and macOS.
 
 In addition to tximport-style summarization, iso2gene can generate
-`tx2gene.tsv` directly from plain text GTF annotations. This `make-map`
+`tx2gene.tsv` directly from GTF annotations. This `make-map`
 subcommand is an iso2gene convenience feature and is not part of tximport
 itself.
 
@@ -24,23 +24,35 @@ kallisto / Salmon / RSEM transcript quantification
 
 ## Features
 
-- Supports kallisto `abundance.tsv`
-- Supports Salmon `quant.sf`
-- Supports RSEM `isoforms.results` 
-- Generates `tx2gene.tsv` from plain text GTF annotations
+- Supports kallisto `abundance.tsv` and `abundance.tsv.gz`
+- Supports Salmon `quant.sf` and `quant.sf.gz`
+- Supports RSEM `isoforms.results` and `isoforms.results.gz`
+- Generates `tx2gene.tsv` from plain text or gzip-compressed GTF annotations
 - Produces gene-level counts, TPM, and effective length matrices
 - Implements `simple-sum`, `scaled-tpm`, and `length-scaled-tpm`
 - Matches tximport `countsFromAbundance="no"`, `"scaledTPM"`, and
   `"lengthScaledTPM"` for supported inputs
 - Runs as a native C++17 executable with no external runtime dependencies
 - Builds with MSVC, GCC, Clang, and Apple Clang
+- Reads LF, CRLF, CR, and no-final-newline text inputs consistently
 
 ## Current Limitations
 
-- Input files must be plain text. `.gz` files are not supported.
-- `abundance.h5` is not supported.
+- kallisto `abundance.h5` is not supported.
+- tximport input types `sailfish`, `stringtie`, `alevin`, `piscem`,
+  `oarfish`, and `none` are not supported.
 - Inferential replicates such as Salmon Gibbs/bootstrap or kallisto bootstrap data are not imported.
 - GFF3 parsing is not supported.
+
+## Gzip Input
+
+iso2gene reads plain text and `.gz` inputs directly. This applies to
+quantification files, `tx2gene` maps, sample sheets, and GTF files used by
+`make-map`.
+
+Gzip support is always enabled in source builds and release binaries. It uses
+vendored miniz, so users do not need to install zlib or a separate gzip command
+at runtime.
 
 ## Install
 
@@ -140,9 +152,9 @@ On Windows PowerShell:
 
 | `--type` | File | Required columns | Notes |
 |---|---|---|---|
-| `kallisto` | `abundance.tsv` | `target_id`, `length`, `eff_length`, `est_counts`, `tpm` | kallisto TSV output |
-| `salmon` | `quant.sf` | `Name`, `Length`, `EffectiveLength`, `TPM`, `NumReads` | Salmon transcript quantification |
-| `rsem` | `isoforms.results` | `transcript_id`, `length`, `effective_length`, `expected_count`, `TPM` | transcript-level RSEM input |
+| `kallisto` | `abundance.tsv`, `abundance.tsv.gz` | `target_id`, `length`, `eff_length`, `est_counts`, `tpm` | kallisto TSV output |
+| `salmon` | `quant.sf`, `quant.sf.gz` | `Name`, `Length`, `EffectiveLength`, `TPM`, `NumReads` | Salmon transcript quantification |
+| `rsem` | `isoforms.results`, `isoforms.results.gz` | `transcript_id`, `length`, `effective_length`, `expected_count`, `TPM` | transcript-level RSEM input |
 
 Column names are matched exactly, including case. For example, Salmon uses
 `TPM` and `NumReads`, while kallisto uses lowercase `tpm`.
@@ -155,7 +167,7 @@ to match tximport's RSEM behavior.
 ```text
 iso2gene counts --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]
 iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...
-iso2gene make-map --gtf annotation.gtf --out tx2gene.tsv [options]
+iso2gene make-map --gtf annotation.gtf[.gz] --out tx2gene.tsv [options]
 iso2gene --version
 ```
 
@@ -182,7 +194,7 @@ Required for `make-map`:
 
 | Option | Description |
 |---|---|
-| `--gtf PATH` | Plain text GTF annotation |
+| `--gtf PATH` | Plain text or gzip-compressed GTF annotation |
 | `--out PATH` | Output `tx2gene.tsv` path |
 
 Options for `make-map`:
@@ -325,18 +337,17 @@ are treated as transcript ID and gene ID.
 The same transcript may not map to multiple genes. Duplicate identical rows
 are ignored with a warning.
 
-To create this file from a plain text GTF annotation:
+To create this file from a plain text or gzip-compressed GTF annotation:
 
 ```bash
 iso2gene make-map \
-  --gtf annotation.gtf \
+  --gtf annotation.gtf.gz \
   --out tx2gene.tsv
 ```
 
 `make-map` extracts rows that contain both `transcript_id` and `gene_id`
 attributes, collapses duplicate identical transcript-to-gene mappings, and
-rejects transcripts that map to multiple genes. GFF3 and `.gtf.gz` input are
-not supported.
+rejects transcripts that map to multiple genes. GFF3 input is not supported.
 
 ## Validation Against tximport
 
@@ -373,6 +384,10 @@ To run the validation scripts locally, provide those tximportData-derived files
 under `tests/data/extdata` with the same directory layout. The external data
 directory is not required to build or run iso2gene.
 
+The oracle script reads the tximportData `.gz` inputs directly and also writes
+`build/tximport_compare/samples_gz_<format>.tsv` sample sheets for validating
+iso2gene's direct gzip input path.
+
 The validation covers:
 
 ```text
@@ -388,6 +403,11 @@ against tximport to within `1e-6` absolute and relative tolerance when using
 The current validation target is Bioconductor tximport `1.38.2`. This matters
 for RSEM input because tximport applies an RSEM-specific transcript length
 clamp before gene-level summarization.
+
+## Third-Party Code
+
+iso2gene vendors miniz for gzip input support. miniz is MIT licensed; see
+`third_party/miniz/LICENSE`.
 
 ## Development
 

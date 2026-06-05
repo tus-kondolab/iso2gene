@@ -104,6 +104,8 @@ write_matrix <- function(matrix, path, row_name = "gene_id") {
 for (format in formats) {
   sample_paths <- character(length(runs))
   names(sample_paths) <- runs
+  gz_sample_paths <- character(length(runs))
+  names(gz_sample_paths) <- runs
 
   for (run in runs) {
     src <- gz_path(format, run)
@@ -114,6 +116,7 @@ for (format in formats) {
     dest <- file.path(plain_root, format, run, plain_name(format, run))
     copy_gz_to_plain(src, dest)
     sample_paths[[run]] <- dest
+    gz_sample_paths[[run]] <- src
   }
 
   sample_sheet <- data.frame(
@@ -130,10 +133,24 @@ for (format in formats) {
     col.names = TRUE
   )
 
+  gz_sample_sheet <- data.frame(
+    sample = runs,
+    path = gz_sample_paths,
+    stringsAsFactors = FALSE
+  )
+  write.table(
+    gz_sample_sheet,
+    file = file.path(out_root, paste0("samples_gz_", format, ".tsv")),
+    sep = "\t",
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = TRUE
+  )
+
   for (mode_name in names(modes)) {
     mode <- modes[[mode_name]]
     txi_args <- list(
-      files = sample_paths,
+      files = gz_sample_paths,
       type = format,
       tx2gene = tx2gene,
       countsFromAbundance = mode,

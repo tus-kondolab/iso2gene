@@ -11,6 +11,7 @@ namespace iso2gene {
 
 std::vector<std::string> split_tsv_line(const std::string& line) {
     std::string cleaned = line;
+    // Defensive for direct callers; TextReader already normalizes CRLF/CR line endings.
     if (!cleaned.empty() && cleaned.back() == '\r') {
         cleaned.pop_back();
     }
@@ -54,28 +55,23 @@ double parse_double_strict(
 }
 
 TsvReader::TsvReader(const std::string& path)
-    : path_(path), input_(path) {
-    if (!input_) {
-        throw Iso2GeneError(ExitCode::io_error, "failed to open TSV file: " + path);
-    }
-}
+    : reader_(path) {}
 
 bool TsvReader::read_row(std::vector<std::string>& fields) {
     std::string line;
-    if (!std::getline(input_, line)) {
+    if (!reader_.read_line(line)) {
         return false;
     }
-    ++line_number_;
     fields = split_tsv_line(line);
     return true;
 }
 
 std::size_t TsvReader::line_number() const noexcept {
-    return line_number_;
+    return reader_.line_number();
 }
 
 const std::string& TsvReader::path() const noexcept {
-    return path_;
+    return reader_.path();
 }
 
 int find_column(

@@ -1,10 +1,23 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(iso2gene VERSION 0.1.1 LANGUAGES CXX)
+project(iso2gene VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_library(iso2gene_miniz
+    third_party/miniz/miniz.c
+    third_party/miniz/miniz_tdef.c
+    third_party/miniz/miniz_tinfl.c
+)
+
+target_include_directories(iso2gene_miniz PUBLIC third_party/miniz)
+target_compile_definitions(iso2gene_miniz PUBLIC
+    MINIZ_NO_ARCHIVE_APIS
+    MINIZ_NO_ARCHIVE_WRITING_APIS
+    MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+)
 
 add_library(iso2gene_core
     src/cli.cpp
@@ -19,12 +32,14 @@ add_library(iso2gene_core
     src/sample_sheet.cpp
     src/salmon.cpp
     src/summarize.cpp
+    src/text_reader.cpp
     src/tsv.cpp
     src/tx2gene.cpp
     src/write_matrix.cpp
 )
 
 target_include_directories(iso2gene_core PUBLIC include)
+target_link_libraries(iso2gene_core PRIVATE iso2gene_miniz)
 
 add_executable(iso2gene src/main.cpp)
 target_link_libraries(iso2gene PRIVATE iso2gene_core)
@@ -40,7 +55,7 @@ endif()
 enable_testing()
 
 add_executable(iso2gene_tests tests/test_main.cpp)
-target_link_libraries(iso2gene_tests PRIVATE iso2gene_core)
+target_link_libraries(iso2gene_tests PRIVATE iso2gene_core iso2gene_miniz)
 
 if(MSVC)
     target_compile_options(iso2gene_tests PRIVATE /W4 /permissive-)

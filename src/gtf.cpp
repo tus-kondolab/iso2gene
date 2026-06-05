@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "iso2gene/error.hpp"
+#include "iso2gene/text_reader.hpp"
 #include "iso2gene/tsv.hpp"
 
 namespace iso2gene {
@@ -206,21 +207,15 @@ GtfMapStats make_tx2gene_from_gtf(const GtfMapOptions& options, Logger& logger) 
         throw Iso2GeneError(ExitCode::input_error, "--gene-id-attr must be non-empty");
     }
 
-    std::ifstream input(options.gtf_path);
-    if (!input) {
-        throw Iso2GeneError(ExitCode::io_error, "failed to open GTF file: " + options.gtf_path);
-    }
+    TextReader input(options.gtf_path);
 
     GtfMapStats stats;
     std::vector<MappingEntry> mappings;
     std::unordered_map<std::string, std::string> tx_to_gene;
 
     std::string line;
-    while (std::getline(input, line)) {
+    while (input.read_line(line)) {
         ++stats.total_rows;
-        if (!line.empty() && line.back() == '\r') {
-            line.pop_back();
-        }
 
         const std::string trimmed_line = trim_ascii(line);
         if (trimmed_line.empty()) {

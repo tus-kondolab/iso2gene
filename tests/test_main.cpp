@@ -1,7 +1,10 @@
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -16,10 +19,13 @@
 #include "iso2gene/salmon.hpp"
 #include "iso2gene/sample_sheet.hpp"
 #include "iso2gene/summarize.hpp"
+#include "iso2gene/text_reader.hpp"
 #include "iso2gene/tsv.hpp"
 #include "iso2gene/tx2gene.hpp"
 #include "iso2gene/error.hpp"
 #include "iso2gene/version.hpp"
+
+#include "miniz.h"
 
 namespace {
 
@@ -328,6 +334,143 @@ std::string temp_output_path(const std::string& filename) {
     return (std::filesystem::temp_directory_path() / filename).string();
 }
 
+std::string read_binary_file(const std::string& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("failed to open fixture: " + path);
+    }
+    return std::string(
+        std::istreambuf_iterator<char>(input),
+        std::istreambuf_iterator<char>()
+    );
+}
+
+void write_binary_file(const std::string& path, const std::string& data) {
+    std::ofstream output(path, std::ios::binary);
+    if (!output) {
+        throw std::runtime_error("failed to open temp output: " + path);
+    }
+    output.write(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!output) {
+        throw std::runtime_error("failed to write temp output: " + path);
+    }
+}
+
+void append_u32_le(std::string& data, const std::uint32_t value) {
+    data.push_back(static_cast<char>(value & 0xFFU));
+    data.push_back(static_cast<char>((value >> 8U) & 0xFFU));
+    data.push_back(static_cast<char>((value >> 16U) & 0xFFU));
+    data.push_back(static_cast<char>((value >> 24U) & 0xFFU));
+}
+
+struct GzipTestHeaderOptions {
+    bool extra = false;
+    bool name = false;
+    bool comment = false;
+    bool header_crc = false;
+};
+
+std::string gzip_bytes(
+    const std::string& data,
+    const bool corrupt_crc = false,
+    const bool truncate = false,
+    const GzipTestHeaderOptions& header_options = {}
+) {
+    std::size_t compressed_size = 0;
+    void* compressed = tdefl_compress_mem_to_heap(
+        data.data(),
+        data.size(),
+        &compressed_size,
+        TDEFL_DEFAULT_MAX_PROBES
+    );
+    if (compressed == nullptr) {
+        throw std::runtime_error("failed to gzip test fixture");
+    }
+
+    std::string output;
+    output.push_back(static_cast<char>(0x1F));
+    output.push_back(static_cast<char>(0x8B));
+    output.push_back(static_cast<char>(0x08));
+    unsigned char flags = 0;
+    if (header_options.extra) {
+        flags |= 0x04U;
+    }
+    if (header_options.name) {
+        flags |= 0x08U;
+    }
+    if (header_options.comment) {
+        flags |= 0x10U;
+    }
+    if (header_options.header_crc) {
+        flags |= 0x02U;
+    }
+    output.push_back(static_cast<char>(flags));
+    output.append(4, '\0');
+    output.push_back(static_cast<char>(0x00));
+    output.push_back(static_cast<char>(0xFF));
+    if (header_options.extra) {
+        output.push_back(static_cast<char>(0x04));
+        output.push_back(static_cast<char>(0x00));
+        output.append("I2GZ", 4);
+    }
+    if (header_options.name) {
+        output.append("sample.tsv");
+        output.push_back('\0');
+    }
+    if (header_options.comment) {
+        output.append("iso2gene gzip optional header test");
+        output.push_back('\0');
+    }
+    if (header_options.header_crc) {
+        output.push_back('\0');
+        output.push_back('\0');
+    }
+    output.append(
+        static_cast<const char*>(compressed),
+        static_cast<const char*>(compressed) + compressed_size
+    );
+    mz_free(compressed);
+
+    std::uint32_t crc = static_cast<std::uint32_t>(
+        mz_crc32(static_cast<mz_ulong>(MZ_CRC32_INIT),
+                 reinterpret_cast<const unsigned char*>(data.data()),
+                 data.size())
+    );
+    if (corrupt_crc) {
+        crc ^= 0xFFFFFFFFU;
+    }
+    append_u32_le(output, crc);
+    append_u32_le(output, static_cast<std::uint32_t>(data.size()));
+
+    if (truncate && output.size() > 3) {
+        output.resize(output.size() - 3);
+    }
+    return output;
+}
+
+std::string gzip_file_to_temp(const std::string& input_path, const std::string& filename) {
+    const std::string output_path = temp_output_path(filename);
+    write_binary_file(output_path, gzip_bytes(read_binary_file(input_path)));
+    return output_path;
+}
+
+std::vector<std::string> read_all_lines(const std::string& path) {
+    iso2gene::TextReader reader(path);
+    std::vector<std::string> lines;
+    std::string line;
+    while (reader.read_line(line)) {
+        lines.push_back(line);
+    }
+    return lines;
+}
+
+void drain_text_reader(const std::string& path) {
+    iso2gene::TextReader reader(path);
+    std::string line;
+    while (reader.read_line(line)) {
+    }
+}
+
 void test_make_map_cli_parse() {
     char arg0[] = "iso2gene";
     char arg1[] = "make-map";
@@ -460,6 +603,189 @@ void test_make_map_rejects_conflicts_and_bad_attributes() {
     require(saw_gff3_hint, "GFF3-like attributes get a helpful error");
 }
 
+void test_text_reader_line_endings_and_bom() {
+    const std::vector<std::string> variants{
+        "a\tb\nc\td\n",
+        "a\tb\r\nc\td\r\n",
+        "a\tb\rc\td\r",
+        "a\tb\nc\td"
+    };
+
+    for (std::size_t i = 0; i < variants.size(); ++i) {
+        const std::string plain_path =
+            temp_output_path("iso2gene_line_endings_" + std::to_string(i) + ".txt");
+        write_binary_file(plain_path, variants[i]);
+        const std::vector<std::string> plain_lines = read_all_lines(plain_path);
+        require(plain_lines.size() == 2, "plain line ending logical line count");
+        require(plain_lines[0] == "a\tb", "plain line ending first line");
+        require(plain_lines[1] == "c\td", "plain line ending second line");
+
+        const std::string gzip_path = plain_path + ".gz";
+        write_binary_file(gzip_path, gzip_bytes(variants[i]));
+        const std::vector<std::string> gzip_lines = read_all_lines(gzip_path);
+        require(gzip_lines == plain_lines, "gzip line endings match plain lines");
+    }
+
+    const std::string bom_sheet =
+        std::string("\xEF\xBB\xBF", 3) + "sample\tpath\ns1\tquant.sf\n";
+    const std::string plain_bom = temp_output_path("iso2gene_bom_sample_sheet.tsv");
+    write_binary_file(plain_bom, bom_sheet);
+    const std::vector<iso2gene::SampleInput> plain_samples =
+        iso2gene::read_sample_sheet(plain_bom);
+    require(plain_samples.size() == 1, "plain BOM sample sheet count");
+    require(plain_samples[0].name == "s1", "plain BOM sample sheet name");
+
+    const std::string gzip_bom = plain_bom + ".gz";
+    write_binary_file(gzip_bom, gzip_bytes(bom_sheet));
+    const std::vector<iso2gene::SampleInput> gzip_samples =
+        iso2gene::read_sample_sheet(gzip_bom);
+    require(gzip_samples.size() == 1, "gzip BOM sample sheet count");
+    require(gzip_samples[0].path == "quant.sf", "gzip BOM sample sheet path");
+}
+
+void test_external_gzip_fixture() {
+    // Generated with external gzip, see tests/data/gzip/README.md.
+    iso2gene::Logger logger;
+    const iso2gene::IdOptions id_options;
+    const iso2gene::Tx2GeneMap map = iso2gene::read_tx2gene(
+        "tests/data/gzip/tx2gene_external.tsv.gz",
+        id_options,
+        logger
+    );
+    require(map.tx_to_gene.size() == 2, "external gzip tx2gene size");
+    require(map.tx_to_gene.at("tx_ext1") == "geneExtA", "external gzip tx_ext1");
+    require(map.tx_to_gene.at("tx_ext2") == "geneExtB", "external gzip tx_ext2");
+}
+
+void test_gzip_optional_header_fields() {
+    GzipTestHeaderOptions options;
+    options.extra = true;
+    options.name = true;
+    options.comment = true;
+    options.header_crc = true;
+
+    const std::string path = temp_output_path("iso2gene_optional_header.tsv.gz");
+    write_binary_file(
+        path,
+        gzip_bytes("transcript_id\tgene_id\nopt_tx1\topt_gene1\n", false, false, options)
+    );
+
+    iso2gene::Logger logger;
+    const iso2gene::IdOptions id_options;
+    const iso2gene::Tx2GeneMap map = iso2gene::read_tx2gene(path, id_options, logger);
+    require(map.tx_to_gene.size() == 1, "gzip optional header tx2gene size");
+    require(map.tx_to_gene.at("opt_tx1") == "opt_gene1", "gzip optional header tx2gene mapping");
+}
+
+void test_gzip_inputs_match_plain() {
+    iso2gene::Logger logger;
+    const iso2gene::IdOptions id_options;
+
+    const std::string kallisto_s1 =
+        gzip_file_to_temp("tests/data/sample1_abundance.tsv", "iso2gene_sample1_abundance.tsv.gz");
+    const std::string kallisto_s2 =
+        gzip_file_to_temp("tests/data/sample2_abundance.tsv", "iso2gene_sample2_abundance.tsv.gz");
+    const iso2gene::GeneMatrices kallisto =
+        summarize_fixture_with_reader(
+            iso2gene::read_kallisto,
+            kallisto_s1,
+            kallisto_s2,
+            iso2gene::CountMode::length_scaled_tpm
+        );
+    assert_fixture_matrix_values(kallisto, "kallisto gzip");
+
+    const std::string salmon_s1 =
+        gzip_file_to_temp("tests/data/salmon_sample1_quant.sf", "iso2gene_salmon_sample1_quant.sf.gz");
+    const std::string salmon_s2 =
+        gzip_file_to_temp("tests/data/salmon_sample2_quant.sf", "iso2gene_salmon_sample2_quant.sf.gz");
+    const iso2gene::GeneMatrices salmon =
+        summarize_fixture_with_reader(
+            iso2gene::read_salmon,
+            salmon_s1,
+            salmon_s2,
+            iso2gene::CountMode::length_scaled_tpm
+        );
+    assert_fixture_matrix_values(salmon, "salmon gzip");
+
+    const std::string rsem_s1 = gzip_file_to_temp(
+        "tests/data/rsem_sample1_isoforms.results",
+        "iso2gene_rsem_sample1_isoforms.results.gz"
+    );
+    const std::string rsem_s2 = gzip_file_to_temp(
+        "tests/data/rsem_sample2_isoforms.results",
+        "iso2gene_rsem_sample2_isoforms.results.gz"
+    );
+    const iso2gene::GeneMatrices rsem =
+        summarize_fixture_with_reader(
+            iso2gene::read_rsem,
+            rsem_s1,
+            rsem_s2,
+            iso2gene::CountMode::length_scaled_tpm
+        );
+    assert_fixture_matrix_values(rsem, "rsem gzip");
+
+    const std::string tx2gene_gz =
+        gzip_file_to_temp("tests/data/tx2gene.tsv", "iso2gene_tx2gene.tsv.gz");
+    const iso2gene::Tx2GeneMap map = iso2gene::read_tx2gene(tx2gene_gz, id_options, logger);
+    require(map.tx_to_gene.size() == 4, "gzip tx2gene size");
+
+    const std::string sample_sheet_gz =
+        gzip_file_to_temp("tests/data/sample_sheet.tsv", "iso2gene_sample_sheet.tsv.gz");
+    const std::vector<iso2gene::SampleInput> samples =
+        iso2gene::read_sample_sheet(sample_sheet_gz);
+    require(samples.size() == 2, "gzip sample sheet count");
+
+    const std::string gtf_gz =
+        gzip_file_to_temp("tests/data/annotation_basic.gtf", "iso2gene_annotation_basic.gtf.gz");
+    const std::string out_path = temp_output_path("iso2gene_annotation_basic_gzip_tx2gene.tsv");
+    const iso2gene::GtfMapOptions options{gtf_gz, out_path, "transcript_id", "gene_id"};
+    const iso2gene::GtfMapStats stats = iso2gene::make_tx2gene_from_gtf(options, logger);
+    require(stats.mappings_written == 3, "gzip GTF mappings written");
+    const iso2gene::Tx2GeneMap generated = iso2gene::read_tx2gene(out_path, id_options, logger);
+    require(generated.tx_to_gene.at("tx3") == "geneC", "gzip GTF generated tx3 mapping");
+}
+
+void test_gzip_concatenated_members_and_errors() {
+    const std::string concatenated = temp_output_path("iso2gene_concatenated.txt.gz");
+    write_binary_file(concatenated, gzip_bytes("a\n") + gzip_bytes("b\n"));
+    const std::vector<std::string> lines = read_all_lines(concatenated);
+    require(lines.size() == 2, "concatenated gzip line count");
+    require(lines[0] == "a" && lines[1] == "b", "concatenated gzip lines");
+
+    const std::string not_gzip = temp_output_path("iso2gene_not_gzip.txt.gz");
+    write_binary_file(not_gzip, "not gzip\n");
+    bool saw_invalid_header = false;
+    try {
+        drain_text_reader(not_gzip);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_invalid_header = error.code() == iso2gene::ExitCode::io_error
+            && std::string(error.what()).find("invalid gzip header") != std::string::npos;
+    }
+    require(saw_invalid_header, "invalid gzip header is rejected");
+
+    const std::string truncated = temp_output_path("iso2gene_truncated.txt.gz");
+    write_binary_file(truncated, gzip_bytes("a\n", false, true));
+    bool saw_truncated = false;
+    try {
+        drain_text_reader(truncated);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_truncated = error.code() == iso2gene::ExitCode::io_error
+            && std::string(error.what()).find("truncated") != std::string::npos;
+    }
+    require(saw_truncated, "truncated gzip is rejected");
+
+    const std::string crc_mismatch = temp_output_path("iso2gene_crc_mismatch.txt.gz");
+    write_binary_file(crc_mismatch, gzip_bytes("a\n", true, false));
+    bool saw_crc_mismatch = false;
+    try {
+        drain_text_reader(crc_mismatch);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_crc_mismatch = error.code() == iso2gene::ExitCode::io_error
+            && std::string(error.what()).find("CRC mismatch") != std::string::npos;
+    }
+    require(saw_crc_mismatch, "gzip CRC mismatch is rejected");
+}
+
 } // namespace
 
 int main() {
@@ -480,6 +806,11 @@ int main() {
         test_make_map_basic_gtf();
         test_make_map_gencode_attribute_edges();
         test_make_map_rejects_conflicts_and_bad_attributes();
+        test_text_reader_line_endings_and_bom();
+        test_external_gzip_fixture();
+        test_gzip_optional_header_fields();
+        test_gzip_inputs_match_plain();
+        test_gzip_concatenated_members_and_errors();
     } catch (const std::exception& error) {
         std::cerr << "TEST FAILED: " << error.what() << '\n';
         return 1;

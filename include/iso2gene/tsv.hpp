@@ -1,9 +1,10 @@
 #pragma once
 
 #include <cstddef>
-#include <fstream>
 #include <string>
 #include <vector>
+
+#include "iso2gene/text_reader.hpp"
 
 namespace iso2gene {
 
@@ -24,9 +25,7 @@ public:
     const std::string& path() const noexcept;
 
 private:
-    std::string path_;
-    std::ifstream input_;
-    std::size_t line_number_ = 0;
+    TextReader reader_;
 };
 
 int find_column(
