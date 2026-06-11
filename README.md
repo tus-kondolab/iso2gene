@@ -25,6 +25,8 @@ kallisto / Salmon / RSEM transcript quantification
   `abundance.tsv`, Salmon `quant.sf`, and RSEM `isoforms.results`
 - Matches tximport `countsFromAbundance="no"`, `"scaledTPM"`, and
   `"lengthScaledTPM"` for supported inputs
+- Produces DTU-oriented transcript-level matrices matching tximport
+  `countsFromAbundance="dtuScaledTPM"` with `txOut=TRUE`
 - Reads plain text and `.gz` quantification files directly
 - Generates `tx2gene.tsv` from plain text or gzip-compressed GTF annotations
 - Runs as a native command line executable on Windows, Linux, and macOS
@@ -175,11 +177,13 @@ quantification files, `tx2gene` maps, sample sheets, and GTF files used by `make
 ```text
 iso2gene counts --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]
 iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...
+iso2gene txout --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]
+iso2gene txout --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...
 iso2gene make-map --gtf annotation.gtf[.gz] --out tx2gene.tsv [options]
 iso2gene --version
 ```
 
-Required for `counts`:
+Required for `counts` and `txout`:
 
 | Option | Description |
 |---|---|
@@ -191,7 +195,7 @@ Options:
 | Option | Description |
 |---|---|
 | `--type TYPE` | `kallisto`, `salmon`, or `rsem` |
-| `--mode MODE` | `simple-sum`, `scaled-tpm`, or `length-scaled-tpm` |
+| `--mode MODE` | For `counts`: `simple-sum`, `scaled-tpm`, or `length-scaled-tpm`; for `txout`: `dtu-scaled-tpm` |
 | `--outdir DIR` | Output directory; default is `out` |
 | `--precision N` | Numeric output precision from `1` to `17`; default is `10` |
 | `--ignore-version` | Strip transcript suffix after the first dot |
@@ -281,6 +285,26 @@ then rescales each sample to the mapped original gene count total.
 This corresponds to tximport `countsFromAbundance="lengthScaledTPM"` and is
 the recommended mode for many gene-level differential expression workflows.
 
+### `dtu-scaled-tpm`
+
+This mode is transcript-level and is available through `iso2gene txout`, not
+through `iso2gene counts`.
+
+It corresponds to tximport `countsFromAbundance="dtuScaledTPM"` with
+`txOut=TRUE`. It is intended for downstream DTU analysis, not for gene-level
+DE analysis.
+
+Example:
+
+```bash
+iso2gene txout \
+  --type salmon \
+  --map tx2gene.tsv \
+  --sample-sheet samples.tsv \
+  --mode dtu-scaled-tpm \
+  --outdir out_dtu
+```
+
 ## Outputs
 
 For `--outdir out`, iso2gene writes:
@@ -303,6 +327,19 @@ ENSG000002	0	3.5
 
 Counts are not rounded by default. Use downstream tools' recommended rounding
 or integer handling policy when necessary.
+
+For `iso2gene txout --outdir out_dtu`, iso2gene writes:
+
+```text
+out_dtu/transcript_counts.tsv
+out_dtu/transcript_tpm.tsv
+out_dtu/transcript_length.tsv
+out_dtu/transcript_gene.tsv
+out_dtu/summary.tsv
+out_dtu/warnings.log
+```
+
+These matrices use transcripts as rows and samples as columns.
 
 ## Transcript ID Normalization
 
@@ -367,6 +404,21 @@ Rscript scripts/make_tximport_oracle.R /path/to/iso2gene
 Rscript scripts/compare_tximport_oracle.R /path/to/iso2gene
 ```
 
+For transcript-level `dtuScaledTPM` / `txout` validation:
+
+```bash
+Rscript scripts/make_txout_oracle.R /path/to/iso2gene
+Rscript scripts/compare_txout_oracle.R /path/to/iso2gene oracle_tximport
+```
+
+If pytximport is installed, the same iso2gene `txout` output can also be
+compared with pytximport:
+
+```bash
+python scripts/make_pytximport_txout_oracle.py /path/to/iso2gene
+Rscript scripts/compare_txout_oracle.R /path/to/iso2gene oracle_pytximport
+```
+
 The validation data is not bundled with iso2gene. The comparison was performed
 with files from the Bioconductor `tximportData` package, specifically the
 package `extdata` directory containing output from multiple transcript
@@ -402,6 +454,8 @@ The validation covers:
 kallisto / salmon / rsem
 countsFromAbundance = no / scaledTPM / lengthScaledTPM
 counts / TPM / effective length matrices
+txOut=TRUE with countsFromAbundance = dtuScaledTPM
+transcript counts / TPM / effective length matrices
 ```
 
 With tximportData-derived two-sample fixtures, iso2gene has been checked

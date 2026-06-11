@@ -56,6 +56,18 @@ std::size_t gene_index(const iso2gene::GeneMatrices& matrices, const std::string
     throw std::runtime_error("missing gene in output: " + gene_id);
 }
 
+std::size_t transcript_index(
+    const iso2gene::TranscriptMatrices& matrices,
+    const std::string& transcript_id
+) {
+    for (std::size_t i = 0; i < matrices.transcript_ids.size(); ++i) {
+        if (matrices.transcript_ids[i] == transcript_id) {
+            return i;
+        }
+    }
+    throw std::runtime_error("missing transcript in output: " + transcript_id);
+}
+
 void test_split_tsv_line() {
     const std::vector<std::string> fields = iso2gene::split_tsv_line("a\t\tb\t");
     require(fields.size() == 4, "split_tsv_line preserves trailing empty fields");
@@ -194,6 +206,31 @@ iso2gene::GeneMatrices summarize_fixture_with_reader(
     return iso2gene::summarize_to_gene(samples, quantifications, map, mode, logger);
 }
 
+iso2gene::TranscriptMatrices summarize_transcript_fixture_with_reader(
+    QuantReader reader,
+    const std::string& sample1_path,
+    const std::string& sample2_path
+) {
+    iso2gene::Logger logger;
+    const iso2gene::IdOptions id_options;
+    const iso2gene::Tx2GeneMap map =
+        iso2gene::read_tx2gene("tests/data/tx2gene.tsv", id_options, logger);
+    const std::vector<iso2gene::SampleInput> samples{
+        {"s1", sample1_path},
+        {"s2", sample2_path}
+    };
+    std::vector<std::vector<iso2gene::QuantRecord>> quantifications;
+    quantifications.push_back(reader(samples[0].path, id_options));
+    quantifications.push_back(reader(samples[1].path, id_options));
+    return iso2gene::summarize_to_transcripts(
+        samples,
+        quantifications,
+        map,
+        iso2gene::TranscriptCountMode::dtu_scaled_tpm,
+        logger
+    );
+}
+
 void test_simple_sum() {
     const iso2gene::GeneMatrices matrices =
         summarize_fixture(iso2gene::CountMode::simple_sum);
@@ -329,6 +366,59 @@ void test_rsem_zero_effective_length_summarization() {
     require_near(matrices.counts(geneZ, 0), 0.0, "rsem zero eff length count");
     require_near(matrices.tpm(geneZ, 0), 0.0, "rsem zero eff length tpm");
     require_near(matrices.length(geneZ, 0), 100.5, "rsem all-zero gene length replacement clamps zero effective length");
+}
+
+void assert_dtu_scaled_tpm_values(
+    const iso2gene::TranscriptMatrices& matrices,
+    const std::string& label
+) {
+    require(matrices.transcript_ids.size() == 3, label + " transcript count");
+    require(matrices.sample_names.size() == 2, label + " sample count");
+    const std::size_t tx1 = transcript_index(matrices, "tx1");
+    const std::size_t tx2 = transcript_index(matrices, "tx2");
+    const std::size_t tx3 = transcript_index(matrices, "tx3");
+
+    require(matrices.gene_ids[tx1] == "geneA", label + " tx1 gene");
+    require(matrices.gene_ids[tx2] == "geneA", label + " tx2 gene");
+    require(matrices.gene_ids[tx3] == "geneB", label + " tx3 gene");
+
+    require_near(matrices.counts(tx1, 0), 14.0625, label + " tx1 s1 dtuScaledTPM");
+    require_near(matrices.counts(tx2, 0), 4.6875, label + " tx2 s1 dtuScaledTPM");
+    require_near(matrices.counts(tx3, 0), 31.25, label + " tx3 s1 dtuScaledTPM");
+    require_near(matrices.counts(tx1, 1), 5.2173913043, label + " tx1 s2 dtuScaledTPM");
+    require_near(matrices.counts(tx2, 1), 7.8260869565, label + " tx2 s2 dtuScaledTPM");
+    require_near(matrices.counts(tx3, 1), 86.9565217391, label + " tx3 s2 dtuScaledTPM");
+
+    require_near(matrices.tpm(tx1, 0), 600000.0, label + " tx1 s1 tpm");
+    require_near(matrices.tpm(tx2, 1), 300000.0, label + " tx2 s2 tpm");
+    require_near(matrices.length(tx1, 0), 90.0, label + " tx1 s1 length");
+    require_near(matrices.length(tx2, 1), 200.0, label + " tx2 s2 length");
+}
+
+void test_dtu_scaled_tpm() {
+    const iso2gene::TranscriptMatrices kallisto =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_kallisto,
+            "tests/data/sample1_abundance.tsv",
+            "tests/data/sample2_abundance.tsv"
+        );
+    assert_dtu_scaled_tpm_values(kallisto, "kallisto");
+
+    const iso2gene::TranscriptMatrices salmon =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_salmon,
+            "tests/data/salmon_sample1_quant.sf",
+            "tests/data/salmon_sample2_quant.sf"
+        );
+    assert_dtu_scaled_tpm_values(salmon, "salmon");
+
+    const iso2gene::TranscriptMatrices rsem =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_rsem,
+            "tests/data/rsem_sample1_isoforms.results",
+            "tests/data/rsem_sample2_isoforms.results"
+        );
+    assert_dtu_scaled_tpm_values(rsem, "rsem");
 }
 
 std::string temp_output_path(const std::string& filename) {
@@ -497,6 +587,49 @@ void test_make_map_cli_parse() {
     require(config.map_out_path == "tx2gene.tsv", "make-map --out parse");
     require(config.transcript_id_attr == "transcript", "make-map transcript attr parse");
     require(config.gene_id_attr == "gene", "make-map gene attr parse");
+}
+
+void test_txout_cli_parse() {
+    char arg0[] = "iso2gene";
+    char arg1[] = "txout";
+    char arg2[] = "--type";
+    char arg3[] = "salmon";
+    char arg4[] = "--map";
+    char arg5[] = "tx2gene.tsv";
+    char arg6[] = "--mode";
+    char arg7[] = "dtu_scaled_tpm";
+    char arg8[] = "--outdir";
+    char arg9[] = "out_dtu";
+    char arg10[] = "s1=quant.sf";
+    char* argv[] = {arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10};
+
+    const iso2gene::Config config = iso2gene::parse_args(11, argv);
+    require(config.command == iso2gene::Command::txout, "txout command parse");
+    require(config.input_type == "salmon", "txout --type parse");
+    require(config.tx2gene_path == "tx2gene.tsv", "txout --map parse");
+    require(config.outdir == "out_dtu", "txout --outdir parse");
+    require(
+        config.transcript_mode == iso2gene::TranscriptCountMode::dtu_scaled_tpm,
+        "txout dtu_scaled_tpm alias parse"
+    );
+    require(config.direct_samples.size() == 1, "txout direct sample parse");
+
+    bool saw_counts_error = false;
+    char c0[] = "iso2gene";
+    char c1[] = "counts";
+    char c2[] = "--map";
+    char c3[] = "tx2gene.tsv";
+    char c4[] = "--mode";
+    char c5[] = "dtu-scaled-tpm";
+    char c6[] = "s1=quant.sf";
+    char* counts_argv[] = {c0, c1, c2, c3, c4, c5, c6};
+    try {
+        (void)iso2gene::parse_args(7, counts_argv);
+    } catch (const iso2gene::Iso2GeneError& error) {
+        saw_counts_error = error.code() == iso2gene::ExitCode::input_error
+            && std::string(error.what()).find("transcript-level only") != std::string::npos;
+    }
+    require(saw_counts_error, "counts rejects dtu-scaled-tpm with helpful error");
 }
 
 void test_version_cli_parse() {
@@ -700,6 +833,13 @@ void test_gzip_inputs_match_plain() {
             iso2gene::CountMode::length_scaled_tpm
         );
     assert_fixture_matrix_values(kallisto, "kallisto gzip");
+    const iso2gene::TranscriptMatrices kallisto_txout =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_kallisto,
+            kallisto_s1,
+            kallisto_s2
+        );
+    assert_dtu_scaled_tpm_values(kallisto_txout, "kallisto txout gzip");
 
     const std::string salmon_s1 =
         gzip_file_to_temp("tests/data/salmon_sample1_quant.sf", "iso2gene_salmon_sample1_quant.sf.gz");
@@ -713,6 +853,13 @@ void test_gzip_inputs_match_plain() {
             iso2gene::CountMode::length_scaled_tpm
         );
     assert_fixture_matrix_values(salmon, "salmon gzip");
+    const iso2gene::TranscriptMatrices salmon_txout =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_salmon,
+            salmon_s1,
+            salmon_s2
+        );
+    assert_dtu_scaled_tpm_values(salmon_txout, "salmon txout gzip");
 
     const std::string rsem_s1 = gzip_file_to_temp(
         "tests/data/rsem_sample1_isoforms.results",
@@ -730,6 +877,13 @@ void test_gzip_inputs_match_plain() {
             iso2gene::CountMode::length_scaled_tpm
         );
     assert_fixture_matrix_values(rsem, "rsem gzip");
+    const iso2gene::TranscriptMatrices rsem_txout =
+        summarize_transcript_fixture_with_reader(
+            iso2gene::read_rsem,
+            rsem_s1,
+            rsem_s2
+        );
+    assert_dtu_scaled_tpm_values(rsem_txout, "rsem txout gzip");
 
     const std::string tx2gene_gz =
         gzip_file_to_temp("tests/data/tx2gene.tsv", "iso2gene_tx2gene.tsv.gz");
@@ -839,6 +993,56 @@ void test_file_outputs_use_lf() {
         "warnings.log"
     );
 
+    const std::string txout_dir = temp_output_path("iso2gene_lf_txout_outputs");
+    iso2gene::Config txout_config;
+    txout_config.command = iso2gene::Command::txout;
+    txout_config.outdir = txout_dir;
+    txout_config.input_type = "salmon";
+    txout_config.transcript_mode = iso2gene::TranscriptCountMode::dtu_scaled_tpm;
+    txout_config.precision = 17;
+
+    iso2gene::TranscriptMatrices transcript_matrices;
+    transcript_matrices.transcript_ids = {"tx_lf"};
+    transcript_matrices.gene_ids = {"gene_lf"};
+    transcript_matrices.sample_names = {"sample_lf"};
+    transcript_matrices.counts = iso2gene::Matrix<double>(1, 1);
+    transcript_matrices.tpm = iso2gene::Matrix<double>(1, 1);
+    transcript_matrices.length = iso2gene::Matrix<double>(1, 1);
+    transcript_matrices.counts(0, 0) = 2.5;
+    transcript_matrices.tpm(0, 0) = 300000.0;
+    transcript_matrices.length(0, 0) = 450.0;
+    transcript_matrices.total_records = 1;
+    transcript_matrices.mapped_records = 1;
+
+    iso2gene::Logger txout_logger;
+    txout_logger.warn("txout lf warning");
+    iso2gene::write_transcript_outputs(txout_config, transcript_matrices, txout_logger);
+
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "transcript_counts.tsv").string(),
+        "transcript_counts.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "transcript_tpm.tsv").string(),
+        "transcript_tpm.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "transcript_length.tsv").string(),
+        "transcript_length.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "transcript_gene.tsv").string(),
+        "transcript_gene.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "summary.tsv").string(),
+        "txout summary.tsv"
+    );
+    require_lf_only_file(
+        (std::filesystem::path(txout_dir) / "warnings.log").string(),
+        "txout warnings.log"
+    );
+
     iso2gene::Logger map_logger;
     const std::string tx2gene_out = temp_output_path("iso2gene_lf_tx2gene.tsv");
     const iso2gene::GtfMapOptions options{
@@ -866,8 +1070,10 @@ int main() {
         test_scaled_tpm_uses_mapped_denominators();
         test_zero_abundance_length_replacement();
         test_rsem_zero_effective_length_summarization();
+        test_dtu_scaled_tpm();
         test_version_cli_parse();
         test_make_map_cli_parse();
+        test_txout_cli_parse();
         test_make_map_basic_gtf();
         test_make_map_gencode_attribute_edges();
         test_make_map_rejects_conflicts_and_bad_attributes();

@@ -34,9 +34,25 @@ CountMode parse_mode(const std::string& value) {
     if (value == "length-scaled-tpm") {
         return CountMode::length_scaled_tpm;
     }
+    if (value == "dtu-scaled-tpm" || value == "dtu_scaled_tpm") {
+        throw Iso2GeneError(
+            ExitCode::input_error,
+            "mode '" + value + "' is transcript-level only; use `iso2gene txout --mode dtu-scaled-tpm`"
+        );
+    }
     throw Iso2GeneError(
         ExitCode::input_error,
         "unsupported mode '" + value + "'; expected simple-sum, scaled-tpm, or length-scaled-tpm"
+    );
+}
+
+TranscriptCountMode parse_transcript_mode(const std::string& value) {
+    if (value == "dtu-scaled-tpm" || value == "dtu_scaled_tpm") {
+        return TranscriptCountMode::dtu_scaled_tpm;
+    }
+    throw Iso2GeneError(
+        ExitCode::input_error,
+        "unsupported txout mode '" + value + "'; expected dtu-scaled-tpm"
     );
 }
 
@@ -63,49 +79,52 @@ int parse_precision(const std::string& value) {
     return static_cast<int>(parsed);
 }
 
-void validate_config(const Config& config) {
-    if (config.command == Command::counts) {
-        if (
-            config.input_type != "kallisto"
-            && config.input_type != "salmon"
-            && config.input_type != "rsem"
-        ) {
-            throw Iso2GeneError(
-                ExitCode::input_error,
-                "unsupported --type '" + config.input_type + "'; expected kallisto, salmon, or rsem"
-            );
-        }
-        if (config.tx2gene_path.empty()) {
-            throw Iso2GeneError(ExitCode::input_error, "missing required option: --map");
-        }
-        if (!config.sample_sheet_path.empty() && !config.direct_samples.empty()) {
-            throw Iso2GeneError(
-                ExitCode::input_error,
-                "use either --sample-sheet or direct sample=path inputs, not both"
-            );
-        }
-        if (config.sample_sheet_path.empty() && config.direct_samples.empty()) {
-            throw Iso2GeneError(
-                ExitCode::input_error,
-                "missing samples; use --sample-sheet or direct sample=path inputs"
-            );
-        }
-
-        std::unordered_set<std::string> names;
-        for (const SampleInput& sample : config.direct_samples) {
-            if (sample.name.empty() || sample.path.empty()) {
-                throw Iso2GeneError(ExitCode::input_error, "sample name and path must be non-empty");
-            }
-            if (!names.insert(sample.name).second) {
-                throw Iso2GeneError(
-                    ExitCode::input_error,
-                    "duplicate sample name in direct inputs: " + sample.name
-                );
-            }
-        }
-        return;
+void validate_quantification_config(const Config& config) {
+    if (
+        config.input_type != "kallisto"
+        && config.input_type != "salmon"
+        && config.input_type != "rsem"
+    ) {
+        throw Iso2GeneError(
+            ExitCode::input_error,
+            "unsupported --type '" + config.input_type + "'; expected kallisto, salmon, or rsem"
+        );
+    }
+    if (config.tx2gene_path.empty()) {
+        throw Iso2GeneError(ExitCode::input_error, "missing required option: --map");
+    }
+    if (!config.sample_sheet_path.empty() && !config.direct_samples.empty()) {
+        throw Iso2GeneError(
+            ExitCode::input_error,
+            "use either --sample-sheet or direct sample=path inputs, not both"
+        );
+    }
+    if (config.sample_sheet_path.empty() && config.direct_samples.empty()) {
+        throw Iso2GeneError(
+            ExitCode::input_error,
+            "missing samples; use --sample-sheet or direct sample=path inputs"
+        );
     }
 
+    std::unordered_set<std::string> names;
+    for (const SampleInput& sample : config.direct_samples) {
+        if (sample.name.empty() || sample.path.empty()) {
+            throw Iso2GeneError(ExitCode::input_error, "sample name and path must be non-empty");
+        }
+        if (!names.insert(sample.name).second) {
+            throw Iso2GeneError(
+                ExitCode::input_error,
+                "duplicate sample name in direct inputs: " + sample.name
+            );
+        }
+    }
+}
+
+void validate_config(const Config& config) {
+    if (config.command == Command::counts || config.command == Command::txout) {
+        validate_quantification_config(config);
+        return;
+    }
     if (config.command == Command::make_map) {
         if (config.gtf_path.empty()) {
             throw Iso2GeneError(ExitCode::input_error, "missing required option: --gtf");
@@ -143,14 +162,20 @@ Config parse_args(int argc, char** argv) {
         config.command = Command::version;
         return config;
     }
-    if (first != "counts" && first != "make-map") {
+    if (first != "counts" && first != "txout" && first != "make-map") {
         throw Iso2GeneError(
             ExitCode::input_error,
-            "unknown command '" + first + "'; expected counts, make-map, or help"
+            "unknown command '" + first + "'; expected counts, txout, make-map, or help"
         );
     }
 
-    config.command = first == "counts" ? Command::counts : Command::make_map;
+    if (first == "counts") {
+        config.command = Command::counts;
+    } else if (first == "txout") {
+        config.command = Command::txout;
+    } else {
+        config.command = Command::make_map;
+    }
 
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -159,7 +184,7 @@ Config parse_args(int argc, char** argv) {
             return config;
         }
 
-        if (config.command == Command::counts) {
+        if (config.command == Command::counts || config.command == Command::txout) {
             if (arg == "--type") {
                 config.input_type = require_value(argc, argv, i, arg);
             } else if (arg == "--map") {
@@ -167,7 +192,12 @@ Config parse_args(int argc, char** argv) {
             } else if (arg == "--sample-sheet") {
                 config.sample_sheet_path = require_value(argc, argv, i, arg);
             } else if (arg == "--mode") {
-                config.mode = parse_mode(require_value(argc, argv, i, arg));
+                const std::string mode = require_value(argc, argv, i, arg);
+                if (config.command == Command::counts) {
+                    config.mode = parse_mode(mode);
+                } else {
+                    config.transcript_mode = parse_transcript_mode(mode);
+                }
             } else if (arg == "--outdir") {
                 config.outdir = require_value(argc, argv, i, arg);
             } else if (arg == "--precision") {
@@ -217,21 +247,32 @@ std::string mode_name(CountMode mode) {
     throw std::logic_error("unknown count mode");
 }
 
+std::string transcript_mode_name(TranscriptCountMode mode) {
+    switch (mode) {
+    case TranscriptCountMode::dtu_scaled_tpm:
+        return "dtu-scaled-tpm";
+    }
+    throw std::logic_error("unknown transcript count mode");
+}
+
 std::string help_text() {
     std::ostringstream out;
     out
-        << "iso2gene: summarize transcript-level quantification to gene-level matrices\n\n"
+        << "iso2gene: convert transcript-level quantification to gene- or transcript-level matrices\n\n"
         << "Usage:\n"
         << "  iso2gene counts --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]\n"
         << "  iso2gene counts --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...\n"
+        << "  iso2gene txout --type TYPE --map tx2gene.tsv --sample-sheet samples.tsv --outdir out [options]\n"
+        << "  iso2gene txout --type TYPE --map tx2gene.tsv --outdir out [options] sample=quant-file ...\n"
         << "  iso2gene make-map --gtf annotation.gtf[.gz] --out tx2gene.tsv [options]\n"
         << "  iso2gene --version\n\n"
-        << "Required for counts:\n"
+        << "Required for counts and txout:\n"
         << "  --map PATH             transcript-to-gene TSV; first two columns are transcript_id and gene_id\n"
         << "  --sample-sheet PATH    TSV with sample and path columns, unless direct sample=path inputs are used\n\n"
         << "Options:\n"
         << "  --type TYPE            kallisto, salmon, or rsem (default: kallisto)\n"
         << "  --mode MODE            simple-sum, scaled-tpm, or length-scaled-tpm (default)\n"
+        << "                         for txout: dtu-scaled-tpm (default)\n"
         << "  --outdir DIR           output directory (default: out)\n"
         << "  --precision N          numeric precision from 1 to 17 (default: 10)\n"
         << "  --ignore-version       strip transcript suffix after first dot\n"
@@ -244,6 +285,8 @@ std::string help_text() {
         << "  --gene-id-attr NAME    attribute name for gene IDs (default: gene_id)\n\n"
         << "Outputs for counts:\n"
         << "  gene_counts.tsv, gene_tpm.tsv, gene_length.tsv, summary.tsv, warnings.log\n\n"
+        << "Outputs for txout:\n"
+        << "  transcript_counts.tsv, transcript_tpm.tsv, transcript_length.tsv, transcript_gene.tsv, summary.tsv, warnings.log\n\n"
         << "Output for make-map:\n"
         << "  tx2gene TSV at --out\n";
     return out.str();

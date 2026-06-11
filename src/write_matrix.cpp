@@ -31,6 +31,49 @@ void write_summary(const Config& config, const GeneMatrices& matrices, const std
     out << "unmapped_transcript_records\t" << matrices.unmapped_records << '\n';
 }
 
+void write_transcript_summary(
+    const Config& config,
+    const TranscriptMatrices& matrices,
+    const std::string& path
+) {
+    std::ofstream out(path, std::ios::out | std::ios::binary);
+    if (!out) {
+        throw Iso2GeneError(ExitCode::io_error, "failed to open summary for writing: " + path);
+    }
+
+    out << "metric\tvalue\n";
+    out << "mode\t" << transcript_mode_name(config.transcript_mode) << '\n';
+    out << "input_type\t" << config.input_type << '\n';
+    out << "samples\t" << matrices.sample_names.size() << '\n';
+    out << "transcripts\t" << matrices.transcript_ids.size() << '\n';
+    out << "total_transcript_records\t" << matrices.total_records << '\n';
+    out << "mapped_transcript_records\t" << matrices.mapped_records << '\n';
+    out << "unmapped_transcript_records\t" << matrices.unmapped_records << '\n';
+}
+
+void write_transcript_gene_tsv(
+    const std::string& path,
+    const std::vector<std::string>& transcript_ids,
+    const std::vector<std::string>& gene_ids
+) {
+    if (transcript_ids.size() != gene_ids.size()) {
+        throw Iso2GeneError(
+            ExitCode::internal_error,
+            "transcript and gene label vectors have different sizes"
+        );
+    }
+
+    std::ofstream out(path, std::ios::out | std::ios::binary);
+    if (!out) {
+        throw Iso2GeneError(ExitCode::io_error, "failed to open transcript-gene map for writing: " + path);
+    }
+
+    out << "transcript_id\tgene_id\n";
+    for (std::size_t row = 0; row < transcript_ids.size(); ++row) {
+        out << transcript_ids[row] << '\t' << gene_ids[row] << '\n';
+    }
+}
+
 } // namespace
 
 void write_matrix_tsv(
@@ -108,6 +151,53 @@ void write_outputs(
         config.precision
     );
     write_summary(config, matrices, path_join(config.outdir, "summary.tsv"));
+    logger.write_warnings(path_join(config.outdir, "warnings.log"));
+}
+
+void write_transcript_outputs(
+    const Config& config,
+    const TranscriptMatrices& matrices,
+    const Logger& logger
+) {
+    std::error_code ec;
+    std::filesystem::create_directories(config.outdir, ec);
+    if (ec) {
+        throw Iso2GeneError(
+            ExitCode::io_error,
+            "failed to create output directory '" + config.outdir + "': " + ec.message()
+        );
+    }
+
+    write_matrix_tsv(
+        path_join(config.outdir, "transcript_counts.tsv"),
+        "transcript_id",
+        matrices.transcript_ids,
+        matrices.sample_names,
+        matrices.counts,
+        config.precision
+    );
+    write_matrix_tsv(
+        path_join(config.outdir, "transcript_tpm.tsv"),
+        "transcript_id",
+        matrices.transcript_ids,
+        matrices.sample_names,
+        matrices.tpm,
+        config.precision
+    );
+    write_matrix_tsv(
+        path_join(config.outdir, "transcript_length.tsv"),
+        "transcript_id",
+        matrices.transcript_ids,
+        matrices.sample_names,
+        matrices.length,
+        config.precision
+    );
+    write_transcript_gene_tsv(
+        path_join(config.outdir, "transcript_gene.tsv"),
+        matrices.transcript_ids,
+        matrices.gene_ids
+    );
+    write_transcript_summary(config, matrices, path_join(config.outdir, "summary.tsv"));
     logger.write_warnings(path_join(config.outdir, "warnings.log"));
 }
 

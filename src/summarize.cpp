@@ -107,6 +107,18 @@ double column_sum(const Matrix<double>& matrix, std::size_t col) {
     return total;
 }
 
+double median(std::vector<double> values) {
+    if (values.empty()) {
+        return 0.0;
+    }
+    std::sort(values.begin(), values.end());
+    const std::size_t mid = values.size() / 2;
+    if (values.size() % 2 == 1) {
+        return values[mid];
+    }
+    return (values[mid - 1] + values[mid]) / 2.0;
+}
+
 void counts_from_abundance(GeneMatrices& output, CountMode mode) {
     if (mode == CountMode::simple_sum) {
         return;
@@ -276,6 +288,129 @@ GeneMatrices summarize_to_gene(
 
     replace_missing_lengths(output.length, average_gene_length);
     counts_from_abundance(output, mode);
+
+    return output;
+}
+
+TranscriptMatrices summarize_to_transcripts(
+    const std::vector<SampleInput>& samples,
+    const std::vector<std::vector<QuantRecord>>& quantifications,
+    const Tx2GeneMap& tx2gene,
+    TranscriptCountMode mode,
+    Logger& logger
+) {
+    if (samples.empty()) {
+        throw Iso2GeneError(ExitCode::input_error, "no samples provided");
+    }
+    if (samples.size() != quantifications.size()) {
+        throw Iso2GeneError(
+            ExitCode::internal_error,
+            "sample list and quantification list sizes differ"
+        );
+    }
+    if (mode != TranscriptCountMode::dtu_scaled_tpm) {
+        throw Iso2GeneError(ExitCode::internal_error, "unsupported transcript count mode");
+    }
+
+    TranscriptMatrices output;
+    output.sample_names.reserve(samples.size());
+    for (const SampleInput& sample : samples) {
+        output.sample_names.push_back(sample.name);
+    }
+
+    std::unordered_map<std::string, std::size_t> transcript_index;
+    for (const std::vector<QuantRecord>& records : quantifications) {
+        for (const QuantRecord& record : records) {
+            ++output.total_records;
+
+            const auto gene_it = tx2gene.tx_to_gene.find(record.transcript_id);
+            if (gene_it == tx2gene.tx_to_gene.end()) {
+                ++output.unmapped_records;
+                continue;
+            }
+            ++output.mapped_records;
+
+            if (transcript_index.find(record.transcript_id) == transcript_index.end()) {
+                const std::size_t index = output.transcript_ids.size();
+                transcript_index.emplace(record.transcript_id, index);
+                output.transcript_ids.push_back(record.transcript_id);
+                output.gene_ids.push_back(gene_it->second);
+            }
+        }
+    }
+
+    if (output.transcript_ids.empty() || output.mapped_records == 0) {
+        throw Iso2GeneError(
+            ExitCode::input_error,
+            "no quantification transcript records matched the tx2gene map"
+        );
+    }
+
+    const std::size_t rows = output.transcript_ids.size();
+    const std::size_t cols = samples.size();
+    output.counts = Matrix<double>(rows, cols, 0.0);
+    output.tpm = Matrix<double>(rows, cols, 0.0);
+    output.length = Matrix<double>(rows, cols, 0.0);
+    std::vector<unsigned char> observed(rows * cols, 0);
+    std::vector<double> library_sizes(cols, 0.0);
+
+    for (std::size_t sample_index = 0; sample_index < samples.size(); ++sample_index) {
+        const std::vector<QuantRecord>& records = quantifications[sample_index];
+        for (const QuantRecord& record : records) {
+            const auto index_it = transcript_index.find(record.transcript_id);
+            if (index_it == transcript_index.end()) {
+                continue;
+            }
+
+            const std::size_t row = index_it->second;
+            output.counts(row, sample_index) = record.est_counts;
+            output.tpm(row, sample_index) = record.tpm;
+            output.length(row, sample_index) = record.eff_length;
+            observed[row * cols + sample_index] = 1;
+            library_sizes[sample_index] += record.est_counts;
+        }
+    }
+
+    std::unordered_map<std::string, std::vector<double>> gene_mean_lengths;
+    for (std::size_t row = 0; row < rows; ++row) {
+        double sum = 0.0;
+        std::size_t count = 0;
+        for (std::size_t col = 0; col < cols; ++col) {
+            if (observed[row * cols + col]) {
+                sum += output.length(row, col);
+                ++count;
+            }
+        }
+        const double mean_length = count > 0 ? sum / static_cast<double>(count) : 0.0;
+        gene_mean_lengths[output.gene_ids[row]].push_back(mean_length);
+    }
+
+    std::unordered_map<std::string, double> gene_median_lengths;
+    for (const auto& item : gene_mean_lengths) {
+        gene_median_lengths.emplace(item.first, median(item.second));
+    }
+
+    for (std::size_t sample_index = 0; sample_index < cols; ++sample_index) {
+        double raw_sum = 0.0;
+        for (std::size_t row = 0; row < rows; ++row) {
+            const double median_length = gene_median_lengths[output.gene_ids[row]];
+            raw_sum += output.tpm(row, sample_index) * median_length;
+        }
+
+        const double scale = raw_sum > 0.0 ? library_sizes[sample_index] / raw_sum : 0.0;
+        for (std::size_t row = 0; row < rows; ++row) {
+            const double median_length = gene_median_lengths[output.gene_ids[row]];
+            output.counts(row, sample_index) =
+                output.tpm(row, sample_index) * median_length * scale;
+        }
+    }
+
+    if (output.unmapped_records > 0) {
+        logger.warn(
+            std::to_string(output.unmapped_records)
+            + " transcript records were not found in tx2gene and were ignored"
+        );
+    }
 
     return output;
 }

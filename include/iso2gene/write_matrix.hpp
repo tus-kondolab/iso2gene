@@ -25,4 +25,10 @@ void write_outputs(
     const Logger& logger
 );
 
+void write_transcript_outputs(
+    const Config& config,
+    const TranscriptMatrices& matrices,
+    const Logger& logger
+);
+
 } // namespace iso2gene
